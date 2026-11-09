@@ -1,0 +1,74 @@
+name: overview
+
+x-backend: &backend
+  build: .
+  env_file: .env
+  environment: &backend-env
+    POSTGRES_HOST: db
+    POSTGRES_DB: ${POSTGRES_DB:-overview}
+    POSTGRES_USER: ${POSTGRES_USER:-overview}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
+    REDIS_URL: redis://redis:6379/0
+    ALLOWED_HOSTS: localhost,127.0.0.1,backend
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_started
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-overview}
+      POSTGRES_USER: ${POSTGRES_USER:-overview}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-overview} -d ${POSTGRES_DB:-overview}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+
+  backend:
+    <<: *backend
+    command: sh -c "python manage.py migrate --noinput && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *backend
+    # -B : planificateur intégré (sync des règles Outlook toutes les 15 min)
+    # -s : le fichier d'horaire est conservé dans un volume, sinon chaque redémarrage remet les compteurs à zéro
+    # (la synchro « toutes les 10 min » pouvait alors dépasser 10 min après un redémarrage).
+    command: celery -A config worker -B -s /beat/celerybeat-schedule -l info
+    volumes:
+      - beat_data:/beat
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+  beat_data:

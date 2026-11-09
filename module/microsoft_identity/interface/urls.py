@@ -1,0 +1,27 @@
+from django.urls import path
+
+from module.microsoft_identity.interface.views import (
+    AddAuthMethodView, DeleteAuthMethodView, DeleteDeviceView, EmergencyView, ResetPasswordView, RevokeSessionsView, SecurityActivityView,
+    SecurityOverviewView, SecuritySyncView,
+)
+
+from module.microsoft_identity.interface.device_policy_views import (
+    DeviceRegistrationHistoryView, DeviceRegistrationView, DirectoryUsersView, SecurityGroupsView,
+)
+
+urlpatterns = [
+    path('identity/connectors/<uuid:connector_id>/groups/', SecurityGroupsView.as_view()),
+    path('identity/connectors/<uuid:connector_id>/directory-users/', DirectoryUsersView.as_view()),
+    path('identity/connectors/<uuid:connector_id>/device-registration/', DeviceRegistrationView.as_view()),
+    path('identity/connectors/<uuid:connector_id>/device-registration/history/',
+         DeviceRegistrationHistoryView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/security/', SecurityOverviewView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/security/activity/', SecurityActivityView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/security/sync/', SecuritySyncView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/revoke-sessions/', RevokeSessionsView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/devices/<str:device_id>/', DeleteDeviceView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/auth-methods/', AddAuthMethodView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/auth-methods/<str:method_id>/', DeleteAuthMethodView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/reset-password/', ResetPasswordView.as_view()),
+    path('identity/mailboxes/<uuid:mailbox_id>/emergency/', EmergencyView.as_view()),
+]

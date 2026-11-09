@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "port": 3000,
+      "url": "http://localhost:3000"
+    },
+    {
+      "name": "backend-api",
+      "port": 8000,
+      "url": "http://localhost:8000"
+    },
+    {
+      "name": "backend-dev",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["manage.py", "runserver", "8001", "--noreload"],
+      "port": 8001
+    }
+  ]
+}
