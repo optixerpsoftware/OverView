@@ -182,6 +182,21 @@ class ServiceTests(TestCase):
         perms = self.svc.permissions(self.c.id, "d1", "f2")
         self.assertEqual({(p["permission_id"], p["inherited"]) for p in perms}, {("pi", True), ("pz", False)})
 
+    def test_drive_list_is_remembered_and_refreshable(self):
+        calls = []
+        orig = self.gw.list_drives
+
+        async def counted():
+            calls.append(1)
+            return await orig()
+        self.gw.list_drives = counted
+        first = self.svc.drives(self.c.id)
+        second = self.svc.drives(self.c.id)
+        self.assertEqual((len(calls), first["cached"], second["cached"]), (1, False, True))   # 2e ouverture : instantanée
+        self.assertEqual([d["id"] for d in second["drives"]], ["d1", "d2"])
+        self.assertFalse(self.svc.drives(self.c.id, refresh=True)["cached"])
+        self.assertEqual(len(calls), 2)
+
     def test_inactive_connector(self):
         svc = SharingService(connectors=type("C", (), {"get": lambda s, i: None})(), scans=DjangoSharingScanRepository())
         with self.assertRaises(ConnectorUnavailable):

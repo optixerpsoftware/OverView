@@ -605,3 +605,40 @@ a.tile:hover { text-decoration: none; color: var(--text); }
   .queue-actions { min-width: 0; }
   .queue-secondary { justify-content: flex-start; }
 }
+
+/* Trafic d'une application tierce */
+.app-traffic { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--subtle); }
+.traffic-bars { display: flex; align-items: flex-end; gap: 2px; height: 70px; margin: 6px 0 10px; }
+.traffic-bars span { flex: 1; min-height: 2px; background: var(--brand); border-radius: 2px 2px 0 0; }
+.traffic-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 10px; }
+
+/* Sélecteur d'espace (explorateur OneDrive / SharePoint) */
+.drive-picker { position: relative; }
+.drive-picker-button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font-weight: 400; min-height: 48px; padding: 6px 12px; }
+.drive-picker-button .grow { flex: 1; min-width: 0; }
+/* Ouvert DANS le flux (pas en superposition) : un conteneur à défilement ne peut plus le couper. */
+.drive-picker-panel { margin-top: 6px; background: var(--surface); border: 1px solid var(--brand); border-radius: 10px;
+  box-shadow: var(--shadow); overflow: hidden; }
+.drive-picker-button[aria-expanded='true'] { border-color: var(--brand); }
+.drive-picker-panel input { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; min-height: 44px; padding: 0 14px; }
+.drive-picker-list { max-height: min(420px, 60vh); overflow: auto; padding: 4px; }
+.drive-picker-group { padding: 8px 10px 4px; font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.drive-picker-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; cursor: pointer; min-width: 0; }
+.drive-picker-item .grow { flex: 1; min-width: 0; }
+.drive-picker-item.on { background: var(--brand-tint); }
+.drive-picker-item.current { box-shadow: inset 3px 0 0 var(--brand); }
+.drive-picker-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 10px; border-top: 1px solid var(--border); }
+
+/* Console de la plateforme : sans navigation latérale */
+.platform-bar { background: #2b2b3a; }
+.content.platform-content { margin-left: 0; }
+
+/* Console plateforme : consommation des limites, lignes cliquables */
+.usage { min-width: 110px; }
+.usage-text { font-size: 13px; font-variant-numeric: tabular-nums; }
+.usage-track { height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; margin-top: 3px; }
+.usage-track span { display: block; height: 100%; border-radius: 3px; background: var(--success); }
+.usage-warn .usage-track span { background: var(--chart-medium); }
+.usage-err .usage-track span { background: var(--danger); }
+.usage-err .usage-text b { color: var(--danger); }
+tr.clickable { cursor: pointer; }

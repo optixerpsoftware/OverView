@@ -36,3 +36,16 @@ class SharingAction(BaseModel):
     class Meta:
         db_table = 'onedrive_sharing_action'
         ordering = ['-create_at']
+
+
+
+class DriveDirectory(BaseModel):
+    """Liste mémorisée des espaces (OneDrive + bibliothèques SharePoint) d'un tenant : l'explorateur l'affiche tout de
+    suite au lieu d'interroger Microsoft (plusieurs secondes) à chaque ouverture. Rafraîchie par l'audit quotidien,
+    par le bouton « Actualiser », ou si elle a plus de 12 heures."""
+    connector_id = models.UUIDField(unique=True)
+    drives = models.JSONField(default=list)
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'onedrive_drive_directory'

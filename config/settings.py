@@ -86,7 +86,7 @@ PUBLIC_SCHEMA_URLCONF = 'config.urls_public'
 DATABASE_ROUTERS = ('django_tenants.routers.TenantSyncRouter',)
 # Domaine de base des MSP : <slug>.<TENANT_BASE_DOMAIN> (ex. acme.overview.ca ; acme.localhost en développement).
 TENANT_BASE_DOMAIN = os.environ.get('TENANT_BASE_DOMAIN', 'localhost')
-PLATFORM_SIGNUP_OPEN = os.environ.get('PLATFORM_SIGNUP_OPEN', 'false').lower() in ('1', 'true', 'oui', 'yes')
+# Aucune inscription en libre-service : un MSP n'est créé que par un super-administrateur (console ou create_msp).
 TENANT_FALLBACK_SCHEMA = None   # tests uniquement
 
 MIDDLEWARE = [

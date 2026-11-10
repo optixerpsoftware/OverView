@@ -119,7 +119,7 @@ def adopt_public_data(schema: str, *, dry_run: bool = False) -> dict:
 
 
 def platform_info() -> dict:
-    return {"signup_open": bool(getattr(settings, "PLATFORM_SIGNUP_OPEN", False)), "base_domain": settings.TENANT_BASE_DOMAIN}
+    return {"base_domain": settings.TENANT_BASE_DOMAIN, "is_platform": True}
 
 
 __all__ = ["create_msp", "adopt_public_data", "ensure_public_tenant", "platform_info", "SignupError", "Optional"]

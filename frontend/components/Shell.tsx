@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import CommandPalette from './CommandPalette';
+import { isPlatformHost } from '../lib/platform';
 import ResponsiveTables from './ResponsiveTables';
 import { logout } from '../lib/api';
 import type { AlertCounts } from '../lib/types';
@@ -26,7 +27,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const live = useRealtimeStore((s) => s.status);
   const { theme, setTheme, navOpen, setNavOpen } = useUiStore();
   const [searching, setSearching] = useState(false);
-  const me = useApi<{ username: string; role: 'client' | 'viewer' | 'operator' | 'admin'; mfa_enabled: boolean }>('/accounts/me/', { enabled: path !== '/login' && path !== '/signup' });
+  const me = useApi<{ username: string; role: 'client' | 'viewer' | 'operator' | 'admin'; mfa_enabled: boolean }>('/accounts/me/', { enabled: path !== '/login' && !path.startsWith('/platform') });
   const isClient = me.data?.role === 'client';
 
   // Ctrl+K (ou ⌘K) ouvre la recherche globale depuis n'importe quelle page.
@@ -45,10 +46,28 @@ export default function Shell({ children }: { children: ReactNode }) {
     else root.setAttribute('data-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (isPlatformHost() && !path.startsWith('/platform')) window.location.replace('/platform');
+  }, [path]);
+
   // Le tiroir de navigation (petits écrans) se referme à chaque changement de page.
   useEffect(() => { setNavOpen(false); }, [path, setNavOpen]);
 
-  if (path === '/login' || path === '/signup') return <div className="content bare">{children}</div>;
+  if (path === '/login' || path === '/platform/login') return <div className="content bare">{children}</div>;
+  if (path.startsWith('/platform')) {
+    return (
+      <>
+        <header className="topbar platform-bar">
+          <Link href="/platform" className="brand">OverView · Plateforme</Link>
+          <span className="spacer" />
+          <button className="ghost logout" onClick={() => { logout(); window.location.href = '/platform/login'; }} aria-label="Se déconnecter">
+            <span className="logout-text">Se déconnecter</span><span className="logout-icon" aria-hidden="true">⎋</span>
+          </button>
+        </header>
+        <main id="main" className="content platform-content">{children}</main>
+      </>
+    );
+  }
 
   const next = THEMES[(THEMES.findIndex((t) => t.value === theme) + 1) % THEMES.length];
   const current = THEMES.find((t) => t.value === theme) ?? THEMES[0];

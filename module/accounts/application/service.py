@@ -60,6 +60,10 @@ def check_access(user, method: str, path: str) -> Optional[tuple[int, str, str]]
     """Contrôle d'accès appliqué à chaque appel d'API (vues async et DRF). None = autorisé."""
     if not path.startswith("/api/") or path.startswith("/api/auth/"):
         return None
+    from shared_kernel.tenancy import PUBLIC, current_schema
+    if current_schema() == PUBLIC:      # console de la plateforme : réservée aux super-administrateurs
+        from module.platform.console import is_platform_admin
+        return None if is_platform_admin(user) else (403, "Réservé aux administrateurs de la plateforme.", "forbidden_role")
     if mfa_required_globally() and not SELF_SERVICE.match(path):
         if not OperatorProfile.objects.filter(user=user, totp_enabled=True).exists():
             return 403, "Active d'abord le MFA de ton compte OverView (Mon compte).", "mfa_enrollment_required"
@@ -184,6 +188,11 @@ class AccountService:
         except Exception as e:  # noqa: BLE001 : messages de validation Django
             raise AccountError(" ".join(getattr(e, "messages", [str(e)])))
         orgs = AccountService._clean_orgs(org_ids or [])
+        from module.platform.limits import QuotaExceeded, check
+        try:
+            check("users")                     # limite de comptes OverView de l'abonnement
+        except QuotaExceeded as e:
+            raise AccountError(str(e)) from e
         if role == "client" and not orgs:
             raise AccountError("Un compte Client doit être rattaché à au moins une organisation.")
         u = get_user_model().objects.create_user(username=username, password=password, email=email or "")
@@ -289,6 +298,9 @@ def org_of_kwargs(kwargs: dict):
 def request_scope(user, kwargs: dict) -> tuple[Optional[frozenset], bool]:
     """(organisations permises, adresse hors portée ?) pour une requête authentifiée."""
     import uuid as _uuid
+    from shared_kernel.tenancy import PUBLIC, current_schema
+    if current_schema() == PUBLIC:
+        return None, False
     scope = allowed_orgs_for(user)
     if scope is None:
         return None, False

@@ -25,10 +25,11 @@ class _SharingView(AsyncAPIView):
 
 
 class DrivesView(_SharingView):
-    """GET : OneDrive des utilisateurs + bibliothèques de documents SharePoint."""
+    """GET ?refresh=1 : OneDrive des utilisateurs + bibliothèques SharePoint ({drives, fetched_at, cached})."""
 
     async def get(self, request, connector_id):
-        return Response(await SharingService().drives_async(connector_id))
+        refresh = request.query_params.get("refresh") == "1"
+        return Response(await SharingService().drives_async(connector_id, refresh=refresh))
 
 
 class ItemsView(_SharingView):

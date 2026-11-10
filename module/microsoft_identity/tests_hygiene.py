@@ -6,7 +6,9 @@ from django.test import SimpleTestCase, TransactionTestCase
 
 from module.insights.domain.alerts import hygiene_alerts
 from module.microsoft_connector.infrastructure.models import MicrosoftConnector
-from module.microsoft_identity.application.hygiene_service import HygieneRefused, HygieneService
+from module.microsoft_identity.application.hygiene_service import (
+    AppNotManaged, HygieneRefused, HygieneService, app_traffic_async, delete_app_async,
+)
 from module.microsoft_identity.domain import hygiene as hy
 from module.microsoft_identity.infrastructure.audit_models import TenantSettingChange
 from module.organization.infrastructure.models import Organization
@@ -105,6 +107,14 @@ class FakeGw:
     async def user_names(self, ids): return {}
     async def set_user_enabled(self, uid, enabled): self.disabled.append((uid, enabled))
     async def set_app_enabled(self, sp, enabled): self.apps.append((sp, enabled))
+    async def sp_activities(self):
+        return {"a1": {"applicationAuthenticationClientSignInActivity": {"lastSignInDateTime": iso(2)}}}
+    async def app_sign_ins(self, app_id, since):
+        return [{"createdDateTime": iso(1), "userPrincipalName": "bob@corp.com", "ipAddress": "6.6.6.6",
+                 "location": {"countryOrRegion": "RU"}, "status": {"errorCode": 0}},
+                {"createdDateTime": iso(1), "userPrincipalName": "bob@corp.com", "ipAddress": "6.6.6.6",
+                 "location": {"countryOrRegion": "RU"}, "status": {"errorCode": 50126}}]
+    async def delete_app(self, sp): self.apps.append((sp, "deleted"))
 
 
 class ServiceTests(TransactionTestCase):
@@ -142,3 +152,25 @@ class ServiceTests(TransactionTestCase):
         app(self.conn.id, "sp-evil", False, confirm="DESACTIVER", by="a")
         self.assertEqual(self.gw.apps, [("sp-evil", False)])
         self.assertFalse(next(a for a in HygieneService.latest(self.conn.id)["apps"] if a["id"] == "sp-evil")["enabled"])
+
+
+
+class TrafficTests(ServiceTests):
+    def test_activity_traffic_and_delete(self):
+        self.svc.scan(self.conn.id)
+        apps = {a["id"]: a for a in HygieneService.latest(self.conn.id)["apps"]}
+        self.assertEqual(apps["sp-evil"]["activity"]["days_since"], 2)            # utilisée sans utilisateur il y a 2 j
+        self.assertFalse(apps["sp-evil"]["activity"]["dormant"])
+        self.assertTrue(apps["sp-ok"]["activity"]["dormant"])                    # aucune activité connue
+        t = async_to_sync(app_traffic_async)(self.svc, self.conn.id, "sp-evil", 7)
+        self.assertEqual((t["summary"]["total"], t["summary"]["failures"], t["summary"]["countries"]), (2, 1, [("RU", 2)]))
+        self.assertEqual(len(t["summary"]["per_day"]), 7)
+        with self.assertRaises(AppNotManaged):
+            async_to_sync(app_traffic_async)(self.svc, self.conn.id, "sp-ms", 7)  # appli Microsoft : non gérée
+        with self.assertRaises(HygieneRefused):
+            async_to_sync(delete_app_async)(self.svc, self.conn.id, "sp-evil", confirm="oui", by="a")
+        r = async_to_sync(delete_app_async)(self.svc, self.conn.id, "sp-evil", confirm="supprimer", by="admin")
+        self.assertTrue(r["deleted"])
+        self.assertIn(("sp-evil", "deleted"), self.gw.apps)
+        self.assertNotIn("sp-evil", [a["id"] for a in HygieneService.latest(self.conn.id)["apps"]])
+        self.assertEqual(TenantSettingChange.objects.filter(setting="app_delete", ok=True).count(), 1)

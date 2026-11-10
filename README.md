@@ -35,9 +35,11 @@ organisations clientes, comptes OverView, connecteurs, alertes…), totalement s
   docker compose exec backend python manage.py create_msp acme --name "Acme TI" --admin admin --email admin@acme.ca
   ```
 
-  ou, avec `PLATFORM_SIGNUP_OPEN=true`, par la page `http://platform.<domaine>:3000/signup`.
+  ou depuis la **console de la plateforme** (`http://platform.<domaine>:3000`). Aucune inscription en libre-service :
+  seul un super-administrateur de la plateforme crée un MSP. Premier super-administrateur :
+  `docker compose exec -it backend python manage.py create_platform_admin <nom>` (MFA obligatoire).
 - **Variables** (`.env`) : `TENANT_BASE_DOMAIN` (défaut `localhost`), `APP_URL_TEMPLATE` (défaut
-  `http://{host}:3000`, adresse du frontend d'un MSP pour les retours et les liens), `PLATFORM_SIGNUP_OPEN`.
+  `http://{host}:3000`, adresse du frontend d'un MSP pour les retours et les liens).
 - **Passage d'une installation existante** (déjà fait pour Updo) : `bootstrap_tenancy` crée le MSP d'origine et y copie
   les données ; les tables restées dans `public` ne sont pas supprimées. Une sauvegarde est faite avant
   (`pg_dump -Fc`), dans `backups/` (exclu de Git).

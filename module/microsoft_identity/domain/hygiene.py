@@ -199,3 +199,54 @@ def summary(inactive: Optional[list], guest_rows: list, admin_info: dict, apps: 
         "admins_no_mfa": sum(1 for p in admin_info["people"] if "Sans MFA" in p["flags"]),
         "apps": len(apps), "apps_high": sum(1 for a in apps if a["risk"] == "high"),
     }
+
+
+
+# ---------------------------------------------------------------- activité (trafic) des applications
+DORMANT_DAYS = 90
+
+
+def _latest(*values) -> Optional[datetime]:
+    return max(filter(None, (parse_dt(v) for v in values)), default=None)
+
+
+def app_activity(row: Optional[dict], now: datetime) -> dict:
+    """Ligne de `servicePrincipalSignInActivities` → dernières utilisations (au nom d'un utilisateur / sans utilisateur)."""
+    row = row or {}
+    g = lambda k: (row.get(k) or {}).get("lastSignInDateTime")       # noqa: E731
+    delegated = _latest(g("delegatedClientSignInActivity"), g("delegatedResourceSignInActivity"))
+    app_only = _latest(g("applicationAuthenticationClientSignInActivity"), g("applicationAuthenticationResourceSignInActivity"))
+    last = _latest(g("lastSignInActivity"), delegated and delegated.isoformat(), app_only and app_only.isoformat())
+    return {
+        "last": last.isoformat() if last else None,
+        "delegated": delegated.isoformat() if delegated else None,
+        "app_only": app_only.isoformat() if app_only else None,
+        "days_since": (now - last).days if last else None,
+        "dormant": last is None or (now - last).days > DORMANT_DAYS,
+    }
+
+
+def traffic_summary(sign_ins: Iterable[dict], now: datetime, days: int) -> dict:
+    """Connexions à une appli (journal des connexions) → volume par jour, par utilisateur, par pays, échecs."""
+    from collections import Counter
+    rows = list(sign_ins)
+    per_day = Counter()
+    users, countries, ips = Counter(), Counter(), Counter()
+    failures = 0
+    for s in rows:
+        at = parse_dt(s.get("createdDateTime"))
+        if at:
+            per_day[at.date().isoformat()] += 1
+        users[s.get("userPrincipalName") or "?"] += 1
+        loc = s.get("location") or {}
+        if loc.get("countryOrRegion"):
+            countries[loc["countryOrRegion"]] += 1
+        if s.get("ipAddress"):
+            ips[s["ipAddress"]] += 1
+        if ((s.get("status") or {}).get("errorCode") or 0) != 0:
+            failures += 1
+    start = (now - timedelta(days=days - 1)).date()
+    series = [{"day": (start + timedelta(days=i)).isoformat(), "count": per_day.get((start + timedelta(days=i)).isoformat(), 0)}
+              for i in range(days)]
+    return {"total": len(rows), "failures": failures, "per_day": series, "users": users.most_common(10),
+            "countries": countries.most_common(10), "ips": ips.most_common(10)}

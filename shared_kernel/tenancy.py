@@ -75,8 +75,13 @@ def use_schema(schema: str) -> Iterator[None]:
 
 def tenant_schemas() -> list[str]:
     from module.platform.models import Msp
+    from datetime import date
+
+    from django.db.models import Q
     with use_schema(PUBLIC):
-        return list(Msp.objects.exclude(schema_name=PUBLIC).filter(is_active=True).values_list("schema_name", flat=True))
+        return list(Msp.objects.exclude(schema_name=PUBLIC).filter(is_active=True)
+                    .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=date.today()))
+                    .values_list("schema_name", flat=True))
 
 
 def for_each_tenant(fn: Callable[[], dict]) -> dict:
@@ -97,20 +102,27 @@ def for_each_tenant(fn: Callable[[], dict]) -> dict:
 
 
 # ---------------------------------------------------------------- résolution du MSP depuis l'adresse
-_DOMAIN_CACHE: dict[str, tuple[str, bool]] = {}
+_DOMAIN_CACHE: dict[str, tuple[Optional[str], float]] = {}
+_DOMAIN_TTL = 60.0     # secondes : une suspension ou une expiration prend effet en moins d'une minute
 
 
 def schema_for_host(host: str) -> Optional[str]:
     """Nom d'hôte (sans port) → schéma du MSP. Cache en mémoire (vidé à chaque création / modification de domaine)."""
+    import time
+    from module.platform.limits import is_expired
     host = (host or "").split(":")[0].lower().strip(".")
-    if host in _DOMAIN_CACHE:
-        return _DOMAIN_CACHE[host][0]
+    hit = _DOMAIN_CACHE.get(host)
+    if hit and time.monotonic() - hit[1] < _DOMAIN_TTL:
+        return hit[0]
     from module.platform.models import Domain
     with use_schema(PUBLIC):
         d = Domain.objects.select_related("tenant").filter(domain=host).first()
-        if d is None or not d.tenant.is_active:
+        if d is None:
             return getattr(settings, "TENANT_FALLBACK_SCHEMA", None)
-        _DOMAIN_CACHE[host] = (d.tenant.schema_name, True)
+        if not d.tenant.is_active or is_expired(d.tenant.expires_at):   # MSP suspendu ou abonnement échu
+            _DOMAIN_CACHE[host] = (None, time.monotonic())
+            return None
+        _DOMAIN_CACHE[host] = (d.tenant.schema_name, time.monotonic())
         return d.tenant.schema_name
 
 

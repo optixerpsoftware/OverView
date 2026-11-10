@@ -89,12 +89,19 @@ class IsolationTests(TransactionTestCase):
 
 
 class SignupTests(TransactionTestCase):
-    def test_validation_and_closed_signup(self):
+    def tearDown(self):
+        from django.db import connection
+        connection.set_schema("test")
+
+    def test_validation_and_no_self_service_signup(self):
         for kw in ({"slug": "Bad Slug"}, {"slug": "public"}, {"slug": "okslug", "admin_password": "123"}):
             with self.assertRaises(SignupError):
                 create_msp(**{"name": "X", "slug": "okslug", "admin_username": "a", "admin_password": PW, **kw})
+        # Plus aucune route d'inscription : seul un super-administrateur crée un MSP.
         r = Client().post("/api/platform/signup/", {"name": "X", "slug": "nouveau"},
                           content_type="application/json", HTTP_HOST="platform.localhost")
-        self.assertEqual(r.status_code, 403)                          # inscriptions fermées par défaut
-        r = Client().get("/api/platform/info/", HTTP_HOST="platform.localhost")
-        self.assertEqual(r.json()["signup_open"], False)
+        self.assertEqual(r.status_code, 404)
+        r = Client().post("/api/platform/msps/", {"name": "X", "slug": "nouveau"},
+                          content_type="application/json", HTTP_HOST="platform.localhost")
+        self.assertEqual(r.status_code, 401)                       # création réservée à la console (connecté)
+        self.assertFalse(Msp.objects.filter(slug="nouveau").exists())

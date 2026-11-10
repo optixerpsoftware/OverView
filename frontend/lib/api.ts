@@ -1,5 +1,6 @@
 import { queryClient } from './queryClient';
 import { useAuthStore } from '../stores/auth';
+import { loginPath } from './platform';
 
 // Adresse de l'API : celle imposée à la compilation si elle existe, sinon la même machine que la page, port 8000.
 // (Une adresse « localhost » figée à la compilation cassait l'accès depuis un autre poste du réseau.)
@@ -92,7 +93,7 @@ export async function api<T = unknown>(
   if (r.status === 401 && retry && (await refreshAccessToken())) return api<T>(path, { method, body }, false);
   if (r.status === 401) {
     logout();
-    if (typeof window !== 'undefined') window.location.href = '/login';
+    if (typeof window !== 'undefined') window.location.href = loginPath();
     throw new ApiError(401, 'Session expirée');
   }
   if (r.status === 204) return null as T;

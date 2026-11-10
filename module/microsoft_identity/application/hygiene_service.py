@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from asgiref.sync import async_to_sync
@@ -51,8 +51,9 @@ class HygieneService:
     # ------------------------------------------------------------------ analyse
     async def scan_async(self, connector_id: uuid.UUID) -> dict:
         connector, gw = await db(self._ctx)(connector_id)
-        (users, roles, regs, sps, grants, org_id), errs = await gather_safe(
-            gw.users_full(), gw.roles(), gw.registrations(), gw.service_principals(), gw.grants(), gw.organization_id())
+        (users, roles, regs, sps, grants, org_id, activities), errs = await gather_safe(
+            gw.users_full(), gw.roles(), gw.registrations(), gw.service_principals(), gw.grants(), gw.organization_id(),
+            gw.sp_activities())
         errors = [_msg(e) for e in errs]
         if users is None:
             raise HygieneUnavailable("Lecture des comptes impossible : " + "; ".join(errors))
@@ -74,6 +75,8 @@ class HygieneService:
                 missing = [p for p in principals if p not in users_by_id]
                 user_names = {**users_by_id, **(await gw.user_names(missing))}
                 apps = hy.app_consents(sps, grants or [], assignments, role_names, resource_names, own, user_names)
+                for a in apps:     # dernière utilisation (trafic) de chaque appli
+                    a["activity"] = hy.app_activity((activities or {}).get(a.get("app_id")), now)
             except Exception as e:  # noqa: BLE001
                 errors.append("Applications tierces : " + _msg(e))
         data = {"scanned_at": now.isoformat(), "inactive": inactive, "guests": guest_rows, "admins": admin_info,
@@ -178,5 +181,67 @@ class HygieneService:
     @staticmethod
     def history(connector_id) -> list[dict]:
         return list(TenantSettingChange.objects.filter(
-            connector_id=connector_id, setting__in=("account_disable", "account_enable", "app_disable", "app_enable")).values(
+            connector_id=connector_id, setting__in=("account_disable", "account_enable", "app_disable", "app_enable", "app_delete")).values(
             "id", "setting", "changes", "ok", "detail", "performed_by", "create_at")[:30])
+
+
+
+# ---------------------------------------------------------------- trafic détaillé et suppression d'une application
+class AppNotManaged(Exception):
+    pass
+
+
+def _app_from_snapshot(connector_id, sp_id) -> dict:
+    snap = HygieneService.latest(connector_id) or {}
+    app = next((a for a in snap.get("apps") or [] if a["id"] == sp_id), None)
+    if app is None:
+        raise AppNotManaged("Application non signalée par la dernière analyse (seules les applis tierces sont gérées ici).")
+    return app
+
+
+async def app_traffic_async(service: "HygieneService", connector_id, sp_id: str, days: int = 30) -> dict:
+    """Trafic d'une appli : connexions des {days} derniers jours (journal Microsoft) + dernière activité connue."""
+    if days not in (7, 30):
+        raise HygieneRefused("Période : 7 ou 30 jours.")
+    _, gw = await db(service._ctx)(connector_id)
+    app = await db(_app_from_snapshot)(connector_id, sp_id)
+    now = service._now()
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    error, rows = "", []
+    try:
+        rows = await gw.app_sign_ins(app["app_id"], since)
+    except Exception as e:  # noqa: BLE001 : journal indisponible (licence, délai) → on affiche ce qu'on sait
+        error = _msg(e)
+    summary = hy.traffic_summary(rows, now, days)
+    recent = [{"at": r.get("createdDateTime"), "user": r.get("userPrincipalName"), "ip": r.get("ipAddress"),
+               "country": (r.get("location") or {}).get("countryOrRegion"),
+               "ok": ((r.get("status") or {}).get("errorCode") or 0) == 0,
+               "client": r.get("clientAppUsed") or (r.get("deviceDetail") or {}).get("browser")} for r in rows[:50]]
+    return {"app": {k: app.get(k) for k in ("id", "name", "publisher", "verified", "risk", "activity", "enabled")},
+            "days": days, "summary": summary, "recent": recent, "error": error,
+            "note": "Le journal couvre les connexions au nom d'utilisateurs. Les accès sans utilisateur (permissions "
+                    "d'application) n'y figurent pas : voir « dernière utilisation sans utilisateur »."}
+
+
+async def delete_app_async(service: "HygieneService", connector_id, sp_id: str, *, confirm: str, by: str) -> dict:
+    if (confirm or "").strip().upper() != "SUPPRIMER":
+        raise HygieneRefused("Tapez SUPPRIMER pour confirmer.")
+    connector, gw = await db(service._ctx)(connector_id)
+    app = await db(_app_from_snapshot)(connector_id, sp_id)
+    change = [f"Application supprimée du tenant : {app['name']} ({app.get('publisher') or 'éditeur inconnu'})"]
+    try:
+        await gw.delete_app(sp_id)
+    except Exception as e:
+        await db(service._audit)(connector, "app_delete", change, False, _msg(e), by)
+        raise
+    await db(service._audit)(connector, "app_delete", change, True, "", by)
+
+    def forget():
+        s = IdentityHygieneSnapshot.objects.filter(connector_id=connector_id).first()
+        if s:
+            s.data["apps"] = [a for a in s.data.get("apps") or [] if a["id"] != sp_id]
+            s.data.setdefault("summary", {})["apps"] = len(s.data["apps"])
+            s.data["summary"]["apps_high"] = sum(1 for a in s.data["apps"] if a.get("risk") == "high")
+            s.save(update_fields=["data", "modified_at"])
+    await db(forget)()
+    return {"id": sp_id, "deleted": True, "name": app["name"]}
