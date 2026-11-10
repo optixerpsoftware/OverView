@@ -13,7 +13,7 @@ import ConnectorRow from './ConnectorRow';
 import Breadcrumb from '../../../components/Breadcrumb';
 import Loading from '../../../components/Loading';
 
-type Dialog = 'connector' | 'consent' | 'import' | null;
+type Dialog = 'connector' | 'import' | null;
 
 const initials = (upn: string) => upn.split('@')[0].split(/[._-]/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
 
@@ -39,22 +39,19 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
 
-  async function startConsent(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
+  // Un clic : on part directement chez Microsoft. Le tenant est celui du compte administrateur qui se connecte,
+  // et le connecteur est nommé automatiquement d'après l'organisation Microsoft 365.
+  async function startConsent() {
     setConsentBusy(true);
     try {
-      const { url } = await api<{ url: string }>('/connectors/consent/start/', {
-        method: 'POST',
-        body: { org_id: id, name: String(f.get('name') ?? ''), tenant_hint: String(f.get('tenant_hint') ?? '') },
-      });
-      window.location.href = url;   // l'administrateur du client se connecte chez Microsoft et accepte
+      const { url } = await api<{ url: string }>('/connectors/consent/start/', { method: 'POST', body: { org_id: id } });
+      window.location.href = url;
     } catch (err) {
       setConsentBusy(false);
-      setDialog(null);
       setNote({ text: errorMessage(err), error: true });
     }
   }
+
   const say = useCallback((text: string, error = false) => setNote(text ? { text, error } : null), []);
 
   async function run<T>(fn: () => Promise<T>, after?: (res: T) => void): Promise<void> {
@@ -181,7 +178,10 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
           </div>
           <div className="hero-actions">
             {consentCfg.data?.available && (
-              <button className="primary" onClick={() => setDialog('consent')}>Connecter Microsoft 365</button>
+              <button className="primary" disabled={consentBusy} onClick={() => void startConsent()}
+                title="Redirige vers Microsoft : connecte-toi avec un administrateur général du tenant à connecter">
+                {consentBusy ? 'Redirection vers Microsoft…' : 'Connecter Microsoft 365'}
+              </button>
             )}
             <button className={consentCfg.data?.available ? '' : 'primary'} onClick={() => setDialog('connector')}>
               {consentCfg.data?.available ? 'Ajouter manuellement' : 'Ajouter un connecteur'}
@@ -226,29 +226,6 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
           </div>
         ))}
       </section>
-
-      {dialog === 'consent' && (
-        <Modal title="Connecter un tenant Microsoft 365" onClose={() => setDialog(null)}>
-          <p>
-            Tu vas être redirigé vers Microsoft. Connecte-toi avec un compte <strong>administrateur général</strong> du
-            tenant à connecter, puis accepte les permissions d&apos;OverView. Le connecteur est créé automatiquement au retour.
-          </p>
-          <form onSubmit={startConsent} className="form" style={{ maxWidth: 'none' }}>
-            <div className="field">
-              <label htmlFor="consent-name">Nom du connecteur (facultatif)</label>
-              <input id="consent-name" name="name" placeholder="Par défaut : le nom de l’organisation dans Microsoft 365" />
-            </div>
-            <div className="field">
-              <label htmlFor="consent-tenant">Domaine ou ID du tenant (facultatif)</label>
-              <input id="consent-tenant" name="tenant_hint" placeholder="ID du tenant, pour cibler directement le bon annuaire" />
-            </div>
-            <div className="dialog-actions">
-              <button type="button" onClick={() => setDialog(null)}>Annuler</button>
-              <button type="submit" className="primary" disabled={consentBusy}>{consentBusy ? 'Redirection…' : 'Continuer vers Microsoft'}</button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
       {dialog === 'connector' && (
         <Modal title="Ajouter un connecteur" onClose={() => setDialog(null)}>

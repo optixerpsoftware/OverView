@@ -71,8 +71,9 @@ Puis `docker compose up -d`. Le bouton **Connecter Microsoft 365** apparaît sur
 ### 3. Connecter un client
 
 1. OverView → **Organisations** → ouvrez (ou créez) l'organisation du client.
-2. **Connecter Microsoft 365**. Nom du connecteur et domaine du tenant (`client.onmicrosoft.com` ou son ID) sont
-   facultatifs ; le domaine évite de choisir le mauvais annuaire quand on a plusieurs comptes.
+2. **Connecter Microsoft 365** : rien à saisir, le bouton redirige directement vers Microsoft. Le tenant connecté est
+   celui du compte administrateur qui se connecte (utilisez une fenêtre privée si votre navigateur est déjà connecté à
+   un autre tenant).
 3. Sur la page Microsoft, connectez-vous avec un **administrateur général** du tenant **client**, puis **Accepter**.
 4. Retour automatique dans OverView : le connecteur est créé, testé et nommé d'après l'organisation Microsoft 365.
    Si Microsoft n'a pas encore propagé le consentement (quelques secondes), le message l'indique : utilisez
