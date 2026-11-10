@@ -107,3 +107,32 @@ class ConsoleSubscriptionTests(TransactionTestCase):
         self.assertEqual(self.call("patch", f"/api/platform/admins/{my_id}/", token, {"active": False}).status_code, 400)
         r = self.call("post", f"/api/platform/admins/{my_id}/reset-mfa/", token)
         self.assertEqual(len(r.json()["secret"]) >= 16, True)
+
+
+class MspSeesOwnSubscriptionTests(TransactionTestCase):
+    def tearDown(self):
+        set_limits(max_tenants=None, max_organizations=None, max_users=None, expires_at=None, plan="personnalise", notes="")
+
+    def get(self, user):
+        return Client().get("/api/subscription/", HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(user)}")
+
+    def test_msp_reads_its_quotas_but_not_internal_notes(self):
+        from module.accounts.application.service import profile_of
+        Organization.objects.create(name="O")
+        set_limits(plan="essentiel", max_tenants=3, max_organizations=1, max_users=5, notes="secret interne",
+                   expires_at=date.today() + timedelta(days=3))
+        admin = get_user_model().objects.create_superuser("adm2", password=PW)
+        body = self.get(admin).json()
+        self.assertEqual(body["plan_label"], "Essentiel")
+        self.assertEqual(body["limits"], {"tenants": 3, "organizations": 1, "users": 5})
+        self.assertEqual(body["usage"]["organizations"], 1)
+        self.assertEqual(body["remaining"]["organizations"], 0)
+        self.assertNotIn("notes", body)
+        self.assertTrue(any("Limite atteinte" in a["text"] for a in body["alerts"]))
+        self.assertTrue(any("échu dans 3 j" in a["text"] for a in body["alerts"]))
+        # Rôle Client (portail) : pas d'accès à l'abonnement du MSP.
+        client = get_user_model().objects.create_user("cli", password=PW)
+        p = profile_of(client)
+        p.role = "client"
+        p.save()
+        self.assertEqual(self.get(client).status_code, 403)

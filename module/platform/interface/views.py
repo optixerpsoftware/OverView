@@ -136,3 +136,14 @@ class ConsoleAdminMfaView(_Console):
 
     async def post(self, request, user_id):
         return no_store(Response(await db(console.reset_admin_mfa)(user_id, request.user.get_username())))
+
+
+class SubscriptionView(AsyncAPIView):
+    """GET : abonnement du MSP connecté (forfait, quotas, consommation, échéance). Lecture seule, rôle Lecture et plus."""
+
+    async def get(self, request):
+        from module.platform.limits import subscription
+        data = await db(subscription)()
+        if data is None:
+            return Response({"detail": "Aucun abonnement pour cet espace."}, status.HTTP_404_NOT_FOUND)
+        return Response(data)

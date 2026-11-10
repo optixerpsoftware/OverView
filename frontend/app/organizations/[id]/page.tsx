@@ -4,6 +4,8 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import Menu from '../../../components/Menu';
 import Modal from '../../../components/Modal';
+import QuotaHint from '../../../components/QuotaHint';
+import { useSubscription } from '../../../lib/subscription';
 import { api, errorMessage } from '../../../lib/api';
 import type {
   AvailableMailbox, Connector, ConnectorCreate, ImportResult, Mailbox, Note, Organization, SyncResult,
@@ -26,6 +28,8 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
   const [dialog, setDialog] = useState<Dialog>(null);
   const consentCfg = useApi<{ available: boolean; redirect_uri: string }>('/connectors/consent/config/');
   const [consentBusy, setConsentBusy] = useState(false);
+  const { full } = useSubscription();
+  const tenantsFull = full('tenants');
 
   // Retour du consentement Microsoft : ?consent=ok|pending|error&message=… → message, puis URL nettoyée.
   useEffect(() => {
@@ -177,13 +181,14 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
             <div className="sub">Connexions au tenant : gouvernance, partage, sécurité des comptes.</div>
           </div>
           <div className="hero-actions">
+            <QuotaHint kind="tenants" />
             {consentCfg.data?.available && (
-              <button className="primary" disabled={consentBusy} onClick={() => void startConsent()}
-                title="Redirige vers Microsoft : connecte-toi avec un administrateur général du tenant à connecter">
+              <button className="primary" disabled={consentBusy || tenantsFull} onClick={() => void startConsent()}
+                title={tenantsFull ? 'Limite de ton abonnement atteinte : voir Mon abonnement' : 'Redirige vers Microsoft : connecte-toi avec un administrateur général du tenant à connecter'}>
                 {consentBusy ? 'Redirection vers Microsoft…' : 'Connecter Microsoft 365'}
               </button>
             )}
-            <button className={consentCfg.data?.available ? '' : 'primary'} onClick={() => setDialog('connector')}>
+            <button className={consentCfg.data?.available ? '' : 'primary'} disabled={tenantsFull} title={tenantsFull ? 'Limite de ton abonnement atteinte : voir Mon abonnement' : undefined} onClick={() => setDialog('connector')}>
               {consentCfg.data?.available ? 'Ajouter manuellement' : 'Ajouter un connecteur'}
             </button>
           </div>

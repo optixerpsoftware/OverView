@@ -2,6 +2,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Loading from '../../../components/Loading';
 import Modal from '../../../components/Modal';
+import QuotaHint from '../../../components/QuotaHint';
+import { useSubscription } from '../../../lib/subscription';
 import { api } from '../../../lib/api';
 import { ago } from '../../../lib/alerts';
 import type { Organization } from '../../../lib/types';
@@ -26,6 +28,7 @@ export default function UsersPage() {
   const [scopeIds, setScopeIds] = useState<Set<string>>(new Set());
   const openScope = (u: User) => { setScoping(u); setScopeAll(u.all_orgs && u.role !== 'client'); setScopeIds(new Set(u.org_ids)); };
   useEffect(() => { document.title = 'Comptes OverView — OverView'; }, []);
+  const { full } = useSubscription();
   const update = useApiMutation(
     (v: { id: number; body: Record<string, unknown> }) => api<User>(`/accounts/users/${v.id}/`, { method: 'PATCH', body: v.body }),
     { invalidate: ['/accounts/'], success: (u) => `Compte « ${u.username} » mis à jour.` },
@@ -48,7 +51,8 @@ export default function UsersPage() {
     <>
       <div className="pagehead">
         <div><h1>Comptes OverView</h1><div className="sub">Qui peut utiliser OverView, et avec quels droits</div></div>
-        <button className="primary" onClick={() => setCreating(true)}>+ Nouveau compte</button>
+        <QuotaHint kind="users" />
+        <button className="primary" disabled={full('users')} title={full('users') ? 'Limite de ton abonnement atteinte : voir Mon abonnement' : undefined} onClick={() => setCreating(true)}>+ Nouveau compte</button>
       </div>
       <section className="card">
         {ROLES.map((r) => <div className="kv" key={r.value}><span>{r.label}</span><span className="sub" style={{ textAlign: 'right' }}>{r.hint}</span></div>)}

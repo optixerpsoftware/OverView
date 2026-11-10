@@ -8,10 +8,12 @@ import { ago, CATEGORY, SEVERITY, SEVERITY_ORDER } from '../lib/alerts';
 import type { AlertCategory, Dashboard, DashboardTenant } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { useMe } from '../lib/useMe';
+import { useSubscription } from '../lib/subscription';
 
 // Tableau de bord global : l'état de sécurité de tous les tenants en un coup d'œil, les urgences en premier.
 export default function DashboardPage() {
   const { isClient } = useMe();
+  const { sub } = useSubscription();
   const dash = useApi<Dashboard>('/insights/dashboard/', { refetchInterval: () => 60_000 });
   useEffect(() => { document.title = 'Tableau de bord — OverView'; }, []);
   const d = dash.data;
@@ -26,6 +28,11 @@ export default function DashboardPage() {
         {!isClient && <Link href="/queue" className="btn primary-link">✅ À faire</Link>}
         <Link href="/alerts" className="btn">Centre d’alertes{d?.alerts.total ? ` (${d.alerts.total})` : ''}</Link>
       </div>
+      {sub?.alerts.map((a, i) => (
+        <div key={i} className={`messagebar ${a.level === 'err' ? 'error' : 'warn'}`}>
+          <span>Abonnement : {a.text}</span> <Link href="/settings/subscription">Voir mon abonnement</Link>
+        </div>
+      ))}
       {dash.error && <div className="messagebar error">{dash.error}</div>}
       {dash.loading && <Loading lines={6} />}
 

@@ -145,6 +145,7 @@ function SideNav({ open, path, me }: { open: boolean; path: string; me?: { data:
       </Link>
       <Link href="/organizations" className={path === '/organizations' ? 'active' : ''}><span aria-hidden="true">🏢</span> Organisations</Link>
       <Link href="/account" className={path === '/account' ? 'active' : ''}><span aria-hidden="true">👤</span> Mon compte</Link>
+      <Link href="/settings/subscription" className={path === '/settings/subscription' ? 'active' : ''}><span aria-hidden="true">📦</span> Abonnement</Link>
       {me?.data?.role === 'admin' && (
         <Link href="/settings/users" className={path === '/settings/users' ? 'active' : ''}><span aria-hidden="true">🔑</span> Comptes OverView</Link>
       )}

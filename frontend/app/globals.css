@@ -642,3 +642,11 @@ a.tile:hover { text-decoration: none; color: var(--text); }
 .usage-err .usage-track span { background: var(--danger); }
 .usage-err .usage-text b { color: var(--danger); }
 tr.clickable { cursor: pointer; }
+
+/* Rappel de quota à côté des boutons de création */
+.quota-hint { font-size: 12.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); text-decoration: none; white-space: nowrap; align-self: center; }
+.quota-hint:hover { background: var(--hover); }
+.quota-warn { color: var(--warning); border-color: currentColor; }
+.quota-err { color: var(--danger); border-color: currentColor; }
+
+.messagebar.warn { background: var(--warning-tint); border-color: var(--warning); color: var(--warning-text); }

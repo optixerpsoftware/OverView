@@ -62,3 +62,18 @@ def check(kind: str, adding: int = 1) -> None:
     if used + adding > limit:
         raise QuotaExceeded(f"Limite de votre abonnement atteinte : {used}/{limit} {label}. "
                             f"Contactez l'éditeur d'OverView pour augmenter votre forfait.")
+
+
+def subscription() -> dict | None:
+    """Abonnement du MSP courant, vu par le MSP lui-même : forfait, limites, consommation, échéance et alertes.
+    Les notes internes de l'éditeur ne sont pas exposées."""
+    from module.platform.console import _subscription_alerts
+    msp = _current_msp()
+    if msp is None:
+        return None
+    out = {"name": msp.name, "plan": msp.plan, "plan_label": PLANS.get(msp.plan, {}).get("label", msp.plan),
+           "limits": {k: getattr(msp, f) for k, (f, _) in KINDS.items()},
+           "usage": usage(msp.schema_name), "expires_at": msp.expires_at, "expired": is_expired(msp.expires_at)}
+    out["remaining"] = {k: (None if out["limits"][k] is None else max(0, out["limits"][k] - out["usage"][k])) for k in KINDS}
+    out["alerts"] = _subscription_alerts(out)
+    return out

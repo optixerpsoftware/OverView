@@ -5,8 +5,10 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import Loading from '../../components/Loading';
 import Menu from '../../components/Menu';
 import Modal from '../../components/Modal';
+import QuotaHint from '../../components/QuotaHint';
 import { api } from '../../lib/api';
 import type { Organization } from '../../lib/types';
+import { useSubscription } from '../../lib/subscription';
 import { useApi, useApiMutation } from '../../lib/useApi';
 
 export default function Home() {
@@ -44,6 +46,7 @@ export default function Home() {
   const q = query.trim().toLowerCase();
   const shown = (orgs ?? []).filter((o) => !q || `${o.name} ${o.description ?? ''}`.toLowerCase().includes(q));
   useEffect(() => { document.title = 'Organisations — OverView'; }, []);
+  const { full } = useSubscription();
 
   return (
     <>
@@ -52,7 +55,8 @@ export default function Home() {
           <h1>Organisations</h1>
           {orgs && <div className="sub">{orgs.length} organisation{orgs.length > 1 ? 's' : ''}</div>}
         </div>
-        <button className="primary" onClick={() => setCreating(true)}>+ Nouvelle organisation</button>
+        <QuotaHint kind="organizations" />
+        <button className="primary" disabled={full('organizations')} title={full('organizations') ? 'Limite de ton abonnement atteinte : voir Mon abonnement' : undefined} onClick={() => setCreating(true)}>+ Nouvelle organisation</button>
       </div>
       {error && <div className="messagebar error">{error}</div>}
 
