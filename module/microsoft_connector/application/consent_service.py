@@ -42,6 +42,20 @@ def api_public_url() -> str:
 
 
 def app_public_url() -> str:
+    """Adresse du frontend du MSP courant : APP_URL_TEMPLATE appliqué à son domaine principal (multi-MSP),
+    sinon APP_PUBLIC_URL."""
+    template = os.environ.get("APP_URL_TEMPLATE", "")
+    if template:
+        try:
+            from module.platform.models import Domain
+            from shared_kernel.tenancy import PUBLIC, current_schema, use_schema
+            schema = current_schema()
+            with use_schema(PUBLIC):
+                d = Domain.objects.filter(tenant__schema_name=schema, is_primary=True).values_list("domain", flat=True).first()
+            if d:
+                return template.format(host=d).rstrip("/")
+        except Exception:  # noqa: BLE001
+            pass
     return os.environ.get("APP_PUBLIC_URL", "http://localhost:3000").rstrip("/")
 
 
@@ -66,14 +80,29 @@ class ConsentService:
         if not self.connectors.orgs.exists(org_id):
             raise OrganizationNotFound(str(org_id))
         req = ConsentRequest.objects.create(org_id=org_id, name=(name or "").strip()[:255], created_by=by[:150])
-        state = signing.dumps({"n": str(req.id)}, salt=SALT, compress=True)
+        from shared_kernel.tenancy import current_schema
+        # Le MSP voyage dans `state` (signé) : Microsoft revient sur une adresse unique, commune à tous les MSP.
+        state = signing.dumps({"n": str(req.id), "s": current_schema()}, salt=SALT, compress=True)
         return admin_consent_url(client_id, redirect_uri(), state, tenant_hint or "organizations")
 
     # --------------------------------------------------------------------------------------- retour de Microsoft
     async def complete_async(self, params) -> str:
         """Traite le retour et renvoie l'URL du frontend où rediriger le navigateur (jamais d'exception : le
         navigateur doit toujours aboutir sur une page lisible)."""
+        from shared_kernel.tenancy import CURRENT_SCHEMA
         result = parse_callback(params)
+        try:
+            schema = signing.loads(result.state, salt=SALT, max_age=MAX_AGE).get("s")
+        except (signing.BadSignature, AttributeError):
+            schema = None
+        token = CURRENT_SCHEMA.set(schema) if schema else None
+        try:
+            return await self._complete(result)
+        finally:
+            if token is not None:
+                CURRENT_SCHEMA.reset(token)
+
+    async def _complete(self, result) -> str:
         req = await db(self._claim)(result.state)
         if req is None:
             return f"{app_public_url()}/organizations?" + urlencode(

@@ -4,6 +4,7 @@
 - Endpoints qui appellent Microsoft Graph : vues async natives (Daphne), voir plus bas.
 """
 from rest_framework import status, viewsets
+from shared_kernel.scope import OrgScopedQuerysetMixin
 from rest_framework.response import Response as DrfResponse
 
 from module.microsoft_outlook.application.services import (
@@ -18,7 +19,7 @@ from shared_kernel.async_api import AsyncAPIView, Response, graph_error_response
 from shared_kernel.async_api import status as http
 
 
-class MailboxViewSet(viewsets.ModelViewSet):
+class MailboxViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     """Lectures via queryset ; écritures métier via OutlookService. (La synchro des règles est une vue async.)"""
     queryset = Mailbox.objects.all().order_by('user_principal_name')
     serializer_class = MailboxSerializer
@@ -38,14 +39,15 @@ class MailboxViewSet(viewsets.ModelViewSet):
         return DrfResponse(out.data, status=status.HTTP_201_CREATED)
 
 
-class OutlookRuleViewSet(viewsets.ModelViewSet):
+class OutlookRuleViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    scope_field = 'mailbox__org_id'
     """Liste/création/modification locales. (La suppression, qui appelle Graph, est une vue async.)"""
     queryset = OutlookRules.objects.all().order_by('mailbox', 'sequence')
     serializer_class = OutlookRuleSerializer
     filterset_fields = ['mailbox', 'is_enabled', 'has_error']
 
 
-class EmailQueueViewSet(viewsets.ModelViewSet):
+class EmailQueueViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = EmailQueue.objects.all().order_by('-create_at')
     serializer_class = EmailQueueSerializer
     filterset_fields = ['org_id']

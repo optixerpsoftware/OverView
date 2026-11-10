@@ -1,3 +1,4 @@
+from shared_kernel.tenancy import for_each_tenant
 from celery import shared_task
 
 from module.microsoft_compliance.application.services import ComplianceService
@@ -10,4 +11,4 @@ def scan_tenant(connector_id: str) -> float | None:
 
 @shared_task
 def scan_all_tenants() -> dict:
-    return ComplianceService().scan_all()
+    return for_each_tenant(lambda: ComplianceService().scan_all())

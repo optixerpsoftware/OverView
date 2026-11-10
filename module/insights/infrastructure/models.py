@@ -22,6 +22,10 @@ class Alert(BaseModel):
     resolved_at = models.DateTimeField(null=True, blank=True)
     acknowledged_by = models.CharField(max_length=150, blank=True, default="")
     notified = models.BooleanField(default=False)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    assigned_to = models.CharField(max_length=150, blank=True, default="", db_index=True)
+    snoozed_until = models.DateTimeField(null=True, blank=True)
+    note = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = 'insights_alert'

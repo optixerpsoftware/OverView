@@ -33,19 +33,29 @@ SECRET_KEY = 'django-insecure-j9uqw5yr6c7^wnatxpe6j75eqr&#y@3@wx-4@i#p-@jp!v)u02
 DEBUG = True
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1],192.168.250.10').split(',')
+# Sous-domaines des MSP (acme.localhost, acme.overview.ca…).
+ALLOWED_HOSTS += ['.' + os.environ.get('TENANT_BASE_DOMAIN', 'localhost')]
 
 CORS_ALLOWED_ORIGINS = [
     o for o in os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',') if o
+]
+# Frontend de chaque MSP : http(s)://<slug>.<domaine de base>[:port]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https?://[a-z0-9-]+\.' + __import__('re').escape(os.environ.get('TENANT_BASE_DOMAIN', 'localhost')) + r'(:\d+)?$',
 ]
 
 
 # Application definition
 
-INSTALLED_APPS = [
+# ---- Multi-tenant (django-tenants) : un schéma PostgreSQL par MSP -----------------------------------------------
+# SHARED_APPS : schéma « public » (la plateforme : MSP, domaines). TENANT_APPS : copiées dans le schéma de chaque MSP
+# (comptes OverView, organisations clientes, connecteurs, alertes… totalement séparés d'un MSP à l'autre).
+SHARED_APPS = [
     'daphne',                     # en premier : `manage.py runserver` sert alors l'app en ASGI (async + WebSocket)
-    'django.contrib.admin',
-    'django.contrib.auth',
+    'django_tenants',
+    'module.platform',
     'django.contrib.contenttypes',
+    'django.contrib.auth',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
@@ -53,6 +63,12 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'django_filters',
+]
+TENANT_APPS = [
+    'django.contrib.contenttypes',
+    'django.contrib.auth',
+    'django.contrib.admin',
+    'django.contrib.sessions',
     'module.microsoft_compliance',
     'module.microsoft_connector',
     'module.microsoft_identity',
@@ -63,8 +79,18 @@ INSTALLED_APPS = [
     'module.protection',
     'module.accounts',
 ]
+INSTALLED_APPS = SHARED_APPS + [a for a in TENANT_APPS if a not in SHARED_APPS]
+TENANT_MODEL = 'platform.Msp'
+TENANT_DOMAIN_MODEL = 'platform.Domain'
+PUBLIC_SCHEMA_URLCONF = 'config.urls_public'
+DATABASE_ROUTERS = ('django_tenants.routers.TenantSyncRouter',)
+# Domaine de base des MSP : <slug>.<TENANT_BASE_DOMAIN> (ex. acme.overview.ca ; acme.localhost en développement).
+TENANT_BASE_DOMAIN = os.environ.get('TENANT_BASE_DOMAIN', 'localhost')
+PLATFORM_SIGNUP_OPEN = os.environ.get('PLATFORM_SIGNUP_OPEN', 'false').lower() in ('1', 'true', 'oui', 'yes')
+TENANT_FALLBACK_SCHEMA = None   # tests uniquement
 
 MIDDLEWARE = [
+    'shared_kernel.tenant_middleware.TenantMiddleware',   # en premier : choisit le schéma du MSP pour la requête
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -101,7 +127,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 if os.environ.get('POSTGRES_HOST'):
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.postgresql',
+            'ENGINE': 'config.db_backend',      # django-tenants + schéma réappliqué par requête
             'NAME': os.environ.get('POSTGRES_DB', 'overview'),
             'USER': os.environ.get('POSTGRES_USER', 'overview'),
             'PASSWORD': os.environ['POSTGRES_PASSWORD'],
@@ -109,11 +135,15 @@ if os.environ.get('POSTGRES_HOST'):
             'PORT': os.environ.get('POSTGRES_PORT', '5432'),
         }
     }
-else:  # développement local sans Docker
+else:  # django-tenants exige PostgreSQL : en local, la base du conteneur (port publié) ou une base locale
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'ENGINE': 'config.db_backend',
+            'NAME': os.environ.get('POSTGRES_DB', 'overview'),
+            'USER': os.environ.get('POSTGRES_USER', 'overview'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+            'HOST': 'localhost',
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
         }
     }
 
@@ -168,7 +198,7 @@ MAILERS = {
 # Django REST framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'shared_kernel.tenant_auth.TenantJWTAuthentication',   # jeton lié au MSP
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -238,3 +268,6 @@ else:  # développement local / tests sans Redis
 
 # Contrôle d'accès des vues async (rôles + MFA obligatoire), appelé après l'authentification JWT.
 API_ACCESS_POLICY = 'module.accounts.application.service.check_access'
+
+TEST_RUNNER = 'config.test_runner.TenantTestRunner'
+API_SCOPE_POLICY = 'module.accounts.application.service.request_scope'

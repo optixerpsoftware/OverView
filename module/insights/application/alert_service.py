@@ -168,7 +168,8 @@ class AlertService:
     @staticmethod
     def list(*, status: str = "active", connector_id=None, org_id=None, severity: str = "", category: str = "",
              limit: int = 500) -> list[dict]:
-        qs = Alert.objects.all()
+        from shared_kernel.scope import scope_filter
+        qs = scope_filter(Alert.objects.all())
         if status == "active":
             qs = qs.filter(status__in=ACTIVE)
         elif status in ("open", "acknowledged", "resolved"):
@@ -188,7 +189,8 @@ class AlertService:
 
     @staticmethod
     def counts(org_id=None) -> dict:
-        qs = Alert.objects.filter(status="open")
+        from shared_kernel.scope import scope_filter
+        qs = scope_filter(Alert.objects.filter(status="open"))
         if org_id:
             qs = qs.filter(org_id=org_id)
         out = {s: 0 for s in rules.SEVERITIES}
@@ -201,12 +203,16 @@ class AlertService:
     def set_status(alert_ids: list, status: str, by: str) -> int:
         if status not in ("open", "acknowledged"):
             raise ValueError("Statut invalide.")
-        qs = Alert.objects.filter(pk__in=alert_ids).exclude(status="resolved")
-        return qs.update(status=status, acknowledged_by=by[:150] if status == "acknowledged" else "")
+        from shared_kernel.scope import scope_filter
+        qs = scope_filter(Alert.objects.filter(pk__in=alert_ids).exclude(status="resolved"))
+        if status == "acknowledged":
+            return qs.update(status=status, acknowledged_by=by[:150], acknowledged_at=djtz.now())
+        return qs.update(status=status, acknowledged_by="", acknowledged_at=None)
 
 
 def _dict(a: Alert) -> dict:
     return {"id": a.id, "connector_id": a.connector_id, "org_id": a.org_id, "key": a.key, "category": a.category,
             "severity": a.severity, "title": a.title, "detail": a.detail, "link": a.link, "data": a.data,
             "status": a.status, "first_seen": a.first_seen, "last_seen": a.last_seen, "resolved_at": a.resolved_at,
-            "acknowledged_by": a.acknowledged_by, "notified": a.notified}
+            "acknowledged_by": a.acknowledged_by, "notified": a.notified, "acknowledged_at": a.acknowledged_at,
+            "assigned_to": a.assigned_to, "snoozed_until": a.snoozed_until, "note": a.note}

@@ -8,6 +8,7 @@ import type {
   AlertCategory, AlertSeverity as Severity, Connector, InsightAlert, NotificationSettings, Organization,
 } from '../../lib/types';
 import { useApi, useApiMutation } from '../../lib/useApi';
+import { useMe } from '../../lib/useMe';
 
 type StatusFilter = 'active' | 'open' | 'acknowledged' | 'resolved';
 const STATUS_LABEL: Record<StatusFilter, string> = {
@@ -16,6 +17,7 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
 
 export default function AlertsPage() {
   const [tab, setTab] = useState<'alerts' | 'notify'>('alerts');
+  const { isClient } = useMe();
   useEffect(() => { document.title = 'Alertes — OverView'; }, []);
   return (
     <>
@@ -27,7 +29,7 @@ export default function AlertsPage() {
       </div>
       <nav className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'alerts'} className={`tab ${tab === 'alerts' ? 'on' : ''}`} onClick={() => setTab('alerts')}>Alertes</button>
-        <button role="tab" aria-selected={tab === 'notify'} className={`tab ${tab === 'notify' ? 'on' : ''}`} onClick={() => setTab('notify')}>Notifications</button>
+        {!isClient && <button role="tab" aria-selected={tab === 'notify'} className={`tab ${tab === 'notify' ? 'on' : ''}`} onClick={() => setTab('notify')}>Notifications</button>}
       </nav>
       <section className="panel">{tab === 'alerts' ? <AlertList /> : <Notifications />}</section>
     </>
@@ -40,6 +42,7 @@ function AlertList() {
   const [category, setCategory] = useState<AlertCategory | ''>('');
   const [connector, setConnector] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { canAct } = useMe();
 
   // Filtres passés dans l'URL depuis le tableau de bord (?severity=critical, ?category=sharing, ?connector=…).
   useEffect(() => {
@@ -89,7 +92,7 @@ function AlertList() {
           <option value="">Tous les tenants</option>
           {(connectors.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        {connector && (
+        {connector && canAct && (
           <button disabled={evaluate.isPending} onClick={() => evaluate.mutate(connector)}>
             {evaluate.isPending ? 'Réévaluation…' : 'Réévaluer maintenant'}
           </button>
@@ -116,7 +119,7 @@ function AlertList() {
           <thead>
             <tr>
               <th style={{ width: 32 }}>
-                {status !== 'resolved' && (
+                {status !== 'resolved' && canAct && (
                   <input type="checkbox" aria-label="Tout sélectionner" checked={allChecked}
                     onChange={() => setSelected(allChecked ? new Set() : new Set(rows.map((a) => a.id)))} />
                 )}
@@ -127,7 +130,7 @@ function AlertList() {
           <tbody>
             {rows.map((a) => (
               <tr key={a.id}>
-                <td>{a.status !== 'resolved' && <input type="checkbox" aria-label={`Sélectionner ${a.title}`} checked={selected.has(a.id)} onChange={() => toggle(a.id)} />}</td>
+                <td>{a.status !== 'resolved' && canAct && <input type="checkbox" aria-label={`Sélectionner ${a.title}`} checked={selected.has(a.id)} onChange={() => toggle(a.id)} />}</td>
                 <td><span className={`badge ${SEVERITY[a.severity].cls}`}>{SEVERITY[a.severity].label}</span></td>
                 <td style={{ maxWidth: 520 }}>
                   <strong>{CATEGORY[a.category]?.icon} {a.title}</strong>
@@ -140,7 +143,7 @@ function AlertList() {
                   {a.status === 'acknowledged' && <span className="badge off" title={`par ${a.acknowledged_by}`}>Prise en compte</span>}
                   {a.status === 'resolved' && <span className="badge ok" title={a.resolved_at ? new Date(a.resolved_at).toLocaleString() : ''}>Résolue</span>}
                 </td>
-                <td align="right">{a.link && <Link href={a.link} className="btn">Ouvrir</Link>}</td>
+                <td align="right">{a.link && canAct && <Link href={a.link} className="btn">Ouvrir</Link>}</td>
               </tr>
             ))}
           </tbody>

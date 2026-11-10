@@ -12,6 +12,12 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 GROUP = "events"
+
+
+def group_name(schema: str | None = None) -> str:
+    """Un groupe par MSP : les événements d'un MSP ne sont jamais diffusés chez un autre."""
+    from shared_kernel.tenancy import current_schema
+    return f"{GROUP}.{schema or current_schema()}"
 log = logging.getLogger(__name__)
 
 
@@ -20,7 +26,7 @@ async def apublish(topic: str, data: dict[str, Any]) -> None:
     try:
         layer = get_channel_layer()
         if layer is not None:
-            await layer.group_send(GROUP, {"type": "event.message", "payload": {"topic": topic, "data": data}})
+            await layer.group_send(group_name(), {"type": "event.message", "payload": {"topic": topic, "data": data}})
     except Exception:  # Redis indisponible, etc.
         log.warning("Publication temps réel impossible (%s)", topic, exc_info=True)
 

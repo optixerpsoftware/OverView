@@ -7,11 +7,12 @@ import ResponsiveTables from './ResponsiveTables';
 import { logout } from '../lib/api';
 import type { AlertCounts } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { ROLE_LABEL } from '../lib/useMe';
+import type { Organization } from '../lib/types';
 import { TENANT_TOOLS, useTenantContext } from '../lib/useTenantContext';
 import { useRealtimeStore } from '../stores/realtime';
 import { useUiStore, type Theme } from '../stores/ui';
 
-const ROLE_LABEL = { viewer: 'Lecture seule', operator: 'Technicien', admin: 'Administrateur' };
 
 const THEMES: { value: Theme; label: string; icon: string }[] = [
   { value: 'auto', label: 'Thème du système', icon: '🖥️' },
@@ -25,7 +26,8 @@ export default function Shell({ children }: { children: ReactNode }) {
   const live = useRealtimeStore((s) => s.status);
   const { theme, setTheme, navOpen, setNavOpen } = useUiStore();
   const [searching, setSearching] = useState(false);
-  const me = useApi<{ username: string; role: 'viewer' | 'operator' | 'admin'; mfa_enabled: boolean }>('/accounts/me/', { enabled: path !== '/login' });
+  const me = useApi<{ username: string; role: 'client' | 'viewer' | 'operator' | 'admin'; mfa_enabled: boolean }>('/accounts/me/', { enabled: path !== '/login' && path !== '/signup' });
+  const isClient = me.data?.role === 'client';
 
   // Ctrl+K (ou ⌘K) ouvre la recherche globale depuis n'importe quelle page.
   useEffect(() => {
@@ -46,7 +48,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   // Le tiroir de navigation (petits écrans) se referme à chaque changement de page.
   useEffect(() => { setNavOpen(false); }, [path, setNavOpen]);
 
-  if (path === '/login') return <div className="content bare">{children}</div>;
+  if (path === '/login' || path === '/signup') return <div className="content bare">{children}</div>;
 
   const next = THEMES[(THEMES.findIndex((t) => t.value === theme) + 1) % THEMES.length];
   const current = THEMES.find((t) => t.value === theme) ?? THEMES[0];
@@ -60,9 +62,11 @@ export default function Shell({ children }: { children: ReactNode }) {
           {Array.from({ length: 9 }).map((_, i) => <i key={i} />)}
         </button>
         <Link href="/" className="brand">OverView</Link>
-        <button className="searchbtn" onClick={() => setSearching(true)} aria-label="Recherche globale (Ctrl+K)">
-          <span aria-hidden="true">🔍</span> <span className="searchbtn-text">Rechercher</span> <kbd>Ctrl K</kbd>
-        </button>
+        {!isClient && (
+          <button className="searchbtn" onClick={() => setSearching(true)} aria-label="Recherche globale (Ctrl+K)">
+            <span aria-hidden="true">🔍</span> <span className="searchbtn-text">Rechercher</span> <kbd>Ctrl K</kbd>
+          </button>
+        )}
         <span className="spacer" />
         <span className={`live ${live}`} title={live === 'open' ? 'Mises à jour en direct (WebSocket)' : 'Temps réel indisponible : rechargement périodique'}>
           <i /> {live === 'open' ? 'En direct' : live === 'connecting' ? 'Connexion…' : 'Hors ligne'}
@@ -80,11 +84,29 @@ export default function Shell({ children }: { children: ReactNode }) {
         </Link>
       </header>
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
-      <SideNav open={navOpen} path={path} me={me} />
+      {isClient ? <ClientNav open={navOpen} path={path} /> : <SideNav open={navOpen} path={path} me={me} />}
       <main id="main" className="content">{children}</main>
       <CommandPalette open={searching} onClose={() => setSearching(false)} />
       <ResponsiveTables />
     </>
+  );
+}
+
+/** Portail client : uniquement ses alertes et ses rapports (le serveur limite de toute façon les données). */
+function ClientNav({ open, path }: { open: boolean; path: string }) {
+  const orgs = useApi<Organization[]>('/organizations/');
+  return (
+    <nav className={`sidenav ${open ? 'open' : ''}`} aria-label="Navigation principale">
+      <div className="section">Mon espace</div>
+      <Link href="/" className={path === '/' ? 'active' : ''}><span aria-hidden="true">📊</span> Tableau de bord</Link>
+      <Link href="/alerts" className={path.startsWith('/alerts') ? 'active' : ''}><span aria-hidden="true">🚨</span> Alertes</Link>
+      {(orgs.data ?? []).map((o) => (
+        <Link key={o.id} href={`/reports/${o.id}`} className={path === `/reports/${o.id}` ? 'active' : ''}>
+          <span aria-hidden="true">📄</span> <span className="ellipsis">Rapport — {o.name}</span>
+        </Link>
+      ))}
+      <Link href="/account" className={path === '/account' ? 'active' : ''}><span aria-hidden="true">👤</span> Mon compte</Link>
+    </nav>
   );
 }
 
@@ -97,6 +119,7 @@ function SideNav({ open, path, me }: { open: boolean; path: string; me?: { data:
     <nav className={`sidenav ${open ? 'open' : ''}`} aria-label="Navigation principale">
       <div className="section">Administration</div>
       <Link href="/" className={path === '/' ? 'active' : ''}><span aria-hidden="true">📊</span> Tableau de bord</Link>
+      <Link href="/queue" className={at('/queue')}><span aria-hidden="true">✅</span> À faire</Link>
       <Link href="/alerts" className={at('/alerts')}>
         <span aria-hidden="true">🚨</span> Alertes
         {!!counts.data?.total && <span className={`nav-count ${counts.data.critical + counts.data.high ? 'hot' : ''}`}>{counts.data.total}</span>}

@@ -1,3 +1,4 @@
+from shared_kernel.scope import OrgScopedQuerysetMixin
 from rest_framework import status, viewsets
 from rest_framework.response import Response
 
@@ -8,7 +9,8 @@ from module.organization.infrastructure.models import Organization
 from module.organization.interface.serializers import OrganizationSerializer
 
 
-class OrganizationViewSet(viewsets.ModelViewSet):
+class OrganizationViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    scope_field = 'id'
     """Lectures via le queryset (CQRS léger) ; la création passe par le service applicatif."""
     queryset = Organization.objects.all().order_by('name')
     serializer_class = OrganizationSerializer

@@ -40,7 +40,7 @@ export function useApi<T>(path: string, options: UseApiOptions<T> = {}): UseApi<
   // On relit le store au moment de l'effet : pendant l'hydratation, `logged` vaut l'état initial (non
   // connecté) même si une session existe dans localStorage ; s'y fier ferait rediriger à tort vers /login.
   useEffect(() => {
-    if (!useAuthStore.getState().access) window.location.href = '/login';
+    if ((options.enabled ?? true) && !useAuthStore.getState().access) window.location.href = '/login';
   }, [logged]);
 
   const q = useQuery<T | null, Error>({

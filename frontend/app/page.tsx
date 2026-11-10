@@ -7,9 +7,11 @@ import ScoreRing from '../components/ScoreRing';
 import { ago, CATEGORY, SEVERITY, SEVERITY_ORDER } from '../lib/alerts';
 import type { AlertCategory, Dashboard, DashboardTenant } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { useMe } from '../lib/useMe';
 
 // Tableau de bord global : l'état de sécurité de tous les tenants en un coup d'œil, les urgences en premier.
 export default function DashboardPage() {
+  const { isClient } = useMe();
   const dash = useApi<Dashboard>('/insights/dashboard/', { refetchInterval: () => 60_000 });
   useEffect(() => { document.title = 'Tableau de bord — OverView'; }, []);
   const d = dash.data;
@@ -21,6 +23,7 @@ export default function DashboardPage() {
           <h1>Tableau de bord</h1>
           <div className="sub">Tous les tenants · données des dernières synchronisations</div>
         </div>
+        {!isClient && <Link href="/queue" className="btn primary-link">✅ À faire</Link>}
         <Link href="/alerts" className="btn">Centre d’alertes{d?.alerts.total ? ` (${d.alerts.total})` : ''}</Link>
       </div>
       {dash.error && <div className="messagebar error">{dash.error}</div>}
@@ -111,6 +114,7 @@ export default function DashboardPage() {
 }
 
 function TenantRow({ t }: { t: DashboardTenant }) {
+  const { isClient } = useMe();
   return (
     <div className="tenant-row">
       <div className="tenant-score">
@@ -131,9 +135,11 @@ function TenantRow({ t }: { t: DashboardTenant }) {
         </div>
       </div>
       <div className="tenant-links">
+        {isClient ? <Link href={`/reports/${t.org_id}`} className="btn">Rapport</Link> : <>
         <Link href={`/compliance/${t.connector_id}`} className="btn">Gouvernance</Link>
         <Link href={`/sharing/${t.connector_id}`} className="btn">Partage</Link>
         <Link href={`/alerts?connector=${t.connector_id}`} className="btn">Alertes</Link>
+        </>}
       </div>
     </div>
   );

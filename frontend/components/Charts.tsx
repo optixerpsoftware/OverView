@@ -51,7 +51,7 @@ export function AlertTrendChart({ data, height = 180 }: { data: TrendDay[]; heig
           );
         })}
         <path d={line} fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />
-        {data.map((d, i) => (i % 7 === 0 || i === data.length - 1) && (
+        {data.map((d, i) => ((i % 7 === 0 && data.length - 1 - i >= 4) || i === data.length - 1) && (
           <text key={d.day} x={PAD_L + i * bw + bw / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="var(--text-2)">{fmtDay(d.day)}</text>
         ))}
       </svg>

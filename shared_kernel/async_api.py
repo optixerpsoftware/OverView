@@ -55,7 +55,7 @@ class AsyncAPIView(View):
     Surcharge `handle_exception(exc)` pour traduire les exceptions métier en réponses ; appelle `super()` en dernier."""
 
     authentication_required = True
-    _auth = JWTAuthentication()
+    _auth = __import__('shared_kernel.tenant_auth', fromlist=['TenantJWTAuthentication']).TenantJWTAuthentication()
 
     async def dispatch(self, request, *args, **kwargs):
         try:
@@ -69,6 +69,8 @@ class AsyncAPIView(View):
                 if denied:
                     code, detail, reason = denied
                     return Response({"detail": detail, "code": reason}, code)
+                if await self._apply_scope(request, kwargs):
+                    return Response({"detail": "Introuvable."}, status.HTTP_404_NOT_FOUND)
             request.query_params = request.GET
             request.data = self._parse_body(request)
             return await handler(request, *args, **kwargs)
@@ -95,6 +97,20 @@ class AsyncAPIView(View):
             return None
         policy = import_string(dotted)
         return await sync_to_async(policy, thread_sensitive=True)(request.user, request.method, request.path)
+
+    @staticmethod
+    async def _apply_scope(request, kwargs) -> bool:
+        """Fixe la portée (organisations permises) pour la requête ; True si l'adresse vise une organisation hors portée."""
+        from django.conf import settings
+        from django.utils.module_loading import import_string
+
+        from shared_kernel.scope import ALLOWED_ORGS
+        dotted = getattr(settings, "API_SCOPE_POLICY", "")
+        if not dotted:
+            return False
+        scope, outside = await sync_to_async(import_string(dotted), thread_sensitive=True)(request.user, kwargs)
+        ALLOWED_ORGS.set(scope)       # contexte de la requête : hérité par tous les accès base de la vue
+        return outside
 
     @staticmethod
     def _parse_body(request) -> Any:
