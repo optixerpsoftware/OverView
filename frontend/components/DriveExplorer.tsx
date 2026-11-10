@@ -4,6 +4,7 @@ import { api, errorMessage } from '../lib/api';
 import type { Drive, DriveItem, Note, ShareEntry } from '../lib/types';
 import { SLOW, useApi } from '../lib/useApi';
 import ConfirmDialog from './ConfirmDialog';
+import DrivePicker from './DrivePicker';
 import { RISK_LABEL, shareLabel } from './ShareLabel';
 import Loading from './Loading';
 
@@ -13,8 +14,26 @@ interface Crumb { id: string | null; name: string }
 
 export default function DriveExplorer({ connectorId }: { connectorId: string }) {
   const base = `/onedrive/connectors/${connectorId}`;
-  const drives = useApi<Drive[]>(`${base}/drives/`, { staleTime: SLOW });
+  const drives = useApi<{ drives: Drive[]; fetched_at: string; cached: boolean }>(`${base}/drives/`, { staleTime: SLOW });
+  const [refreshing, setRefreshing] = useState(false);
+  // Dernier espace ouvert pour ce tenant : rouvert automatiquement au retour sur la page.
+  const lastKey = `overview-last-drive-${connectorId}`;
   const [driveId, setDriveId] = useState('');
+  useEffect(() => {
+    try { const last = localStorage.getItem(lastKey); if (last) setDriveId(last); } catch { /* sans importance */ }
+  }, [lastKey]);
+
+  async function refreshDrives() {
+    setRefreshing(true);
+    try {
+      await api(`${base}/drives/?refresh=1`);
+      await drives.reload();
+    } catch (e) {
+      setNote({ text: errorMessage(e), error: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }
   const [trail, setTrail] = useState<Crumb[]>([{ id: null, name: 'Racine' }]);
   const [items, setItems] = useState<DriveItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,6 +64,7 @@ export default function DriveExplorer({ connectorId }: { connectorId: string }) 
   useEffect(() => { void load(); }, [load]);
 
   function pickDrive(id: string) {
+    try { localStorage.setItem(lastKey, id); } catch { /* sans importance */ }
     setDriveId(id);
     setTrail([{ id: null, name: 'Racine' }]);
   }
@@ -86,19 +106,11 @@ export default function DriveExplorer({ connectorId }: { connectorId: string }) 
     }
   }
 
-  const grouped = {
-    onedrive: (drives.data ?? []).filter((d) => d.kind === 'onedrive'),
-    sharepoint: (drives.data ?? []).filter((d) => d.kind === 'sharepoint'),
-  };
-
   return (
     <>
-      <div style={{ padding: '4px 0 12px', maxWidth: 520 }}>
-        <select value={driveId} onChange={(e) => pickDrive(e.target.value)}>
-          <option value="">{drives.data ? 'Choisir un OneDrive ou une bibliothèque SharePoint…' : 'Chargement des espaces…'}</option>
-          <optgroup label="OneDrive">{grouped.onedrive.map((d) => <option key={d.id} value={d.id}>{d.label.replace('OneDrive — ', '')}</option>)}</optgroup>
-          <optgroup label="SharePoint">{grouped.sharepoint.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}</optgroup>
-        </select>
+      <div style={{ padding: '4px 0 12px', maxWidth: 560 }}>
+        <DrivePicker connectorId={connectorId} drives={drives.data?.drives ?? null} value={driveId} onChange={pickDrive}
+          fetchedAt={drives.data?.fetched_at} refreshing={refreshing} onRefresh={() => void refreshDrives()} />
       </div>
 
       {(note || drives.error) && <div className={`messagebar ${note?.error || drives.error ? 'error' : ''}`}>{note?.text ?? drives.error}</div>}

@@ -10,6 +10,7 @@ const TYPE_LABEL: Record<SearchHit['type'], string> = {
 };
 const PAGES: SearchHit[] = [
   { type: 'org', label: 'Tableau de bord', sub: 'Page', href: '/' },
+  { type: 'org', label: 'À faire', sub: 'Page', href: '/queue' },
   { type: 'org', label: 'Centre d’alertes', sub: 'Page', href: '/alerts' },
   { type: 'org', label: 'Organisations', sub: 'Page', href: '/organizations' },
 ];

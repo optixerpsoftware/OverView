@@ -6,9 +6,19 @@ from typing import Optional
 
 from shared_kernel.totp import totp_code
 
-ROLES = ("viewer", "operator", "admin")
-ROLE_LABEL = {"viewer": "Lecture seule", "operator": "Technicien", "admin": "Administrateur"}
+ROLES = ("client", "viewer", "operator", "admin")
+ROLE_LABEL = {"client": "Client (portail)", "viewer": "Lecture seule", "operator": "Technicien", "admin": "Administrateur"}
 _RANK = {r: i for i, r in enumerate(ROLES)}
+
+# Portail client : lecture seule d'un sous-ensemble de pages (sa propre organisation, filtrée par la portée).
+CLIENT_READS = [re.compile(p) for p in (
+    r"^/api/organizations/?$",
+    r"^/api/organizations/[0-9a-f-]{36}/?$",
+    r"^/api/insights/dashboard/$",
+    r"^/api/insights/alerts/$",
+    r"^/api/insights/alerts/counts/$",
+    r"^/api/insights/organizations/[0-9a-f-]{36}/report/$",
+)]
 SAFE = {"GET", "HEAD", "OPTIONS"}
 
 # Routes toujours permises à un compte connecté (son propre compte et son MFA), même en lecture seule
@@ -37,9 +47,11 @@ def at_least(role: str, minimum: str) -> bool:
 def required_role(method: str, path: str) -> str:
     """Rôle minimal pour appeler `method path` sur l'API."""
     if SELF_SERVICE.match(path):
-        return "viewer"
+        return "client"
     if method.upper() in SAFE:
-        return "admin" if path.startswith("/api/accounts/users") else "viewer"
+        if path.startswith("/api/accounts/users"):
+            return "admin"
+        return "client" if any(p.match(path) for p in CLIENT_READS) else "viewer"
     if any(p.match(path) for p in ADMIN_WRITES):
         return "admin"
     return "operator"

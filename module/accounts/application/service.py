@@ -50,7 +50,9 @@ def role_of(user) -> str:
 
 
 def _tokens(user) -> dict:
+    from shared_kernel.tenancy import TENANT_CLAIM, current_schema
     r = RefreshToken.for_user(user)
+    r[TENANT_CLAIM] = current_schema()      # jeton valable uniquement dans l'espace OverView de ce MSP
     return {"access": str(r.access_token), "refresh": str(r)}
 
 
@@ -58,6 +60,10 @@ def check_access(user, method: str, path: str) -> Optional[tuple[int, str, str]]
     """Contrôle d'accès appliqué à chaque appel d'API (vues async et DRF). None = autorisé."""
     if not path.startswith("/api/") or path.startswith("/api/auth/"):
         return None
+    from shared_kernel.tenancy import PUBLIC, current_schema
+    if current_schema() == PUBLIC:      # console de la plateforme : réservée aux super-administrateurs
+        from module.platform.console import is_platform_admin
+        return None if is_platform_admin(user) else (403, "Réservé aux administrateurs de la plateforme.", "forbidden_role")
     if mfa_required_globally() and not SELF_SERVICE.match(path):
         if not OperatorProfile.objects.filter(user=user, totp_enabled=True).exists():
             return 403, "Active d'abord le MFA de ton compte OverView (Mon compte).", "mfa_enrollment_required"
@@ -157,7 +163,8 @@ class AccountService:
             p = OperatorProfile.objects.filter(user=u).first()
             out.append({"id": u.pk, "username": u.get_username(), "email": u.email, "active": u.is_active,
                         "role": role_of(u), "mfa_enabled": bool(p and p.totp_enabled), "superuser": u.is_superuser,
-                        "last_login": u.last_login})
+                        "last_login": u.last_login, "all_orgs": True if (p is None or u.is_superuser) else p.all_orgs,
+                        "org_ids": [] if p is None else [str(o) for o in p.org_ids or []]})
         return out
 
     @staticmethod
@@ -169,7 +176,8 @@ class AccountService:
         return n
 
     @staticmethod
-    def create_user(username: str, password: str, role: str, email: str = "") -> dict:
+    def create_user(username: str, password: str, role: str, email: str = "", all_orgs: bool = True,
+                    org_ids: Optional[list] = None) -> dict:
         if role not in ROLES:
             raise AccountError("Rôle invalide.")
         username = (username or "").strip()
@@ -179,13 +187,36 @@ class AccountService:
             validate_password(password)
         except Exception as e:  # noqa: BLE001 : messages de validation Django
             raise AccountError(" ".join(getattr(e, "messages", [str(e)])))
+        orgs = AccountService._clean_orgs(org_ids or [])
+        from module.platform.limits import QuotaExceeded, check
+        try:
+            check("users")                     # limite de comptes OverView de l'abonnement
+        except QuotaExceeded as e:
+            raise AccountError(str(e)) from e
+        if role == "client" and not orgs:
+            raise AccountError("Un compte Client doit être rattaché à au moins une organisation.")
         u = get_user_model().objects.create_user(username=username, password=password, email=email or "")
-        OperatorProfile.objects.create(user=u, role=role)
+        OperatorProfile.objects.create(user=u, role=role, all_orgs=bool(all_orgs) and role != "client", org_ids=orgs)
         return next(x for x in AccountService.users() if x["id"] == u.pk)
 
     @staticmethod
+    def _clean_orgs(org_ids: list) -> list[str]:
+        import uuid as _uuid
+        from module.organization.infrastructure.models import Organization
+        ids = []
+        for o in org_ids:
+            try:
+                ids.append(_uuid.UUID(str(o)))
+            except ValueError:
+                raise AccountError("Identifiant d'organisation invalide.")
+        known = set(Organization.objects.filter(pk__in=ids).values_list("pk", flat=True))
+        if len(known) != len(set(ids)):
+            raise AccountError("Organisation inconnue.")
+        return [str(i) for i in sorted(known, key=str)]
+
+    @staticmethod
     def update_user(actor, user_id: int, *, role: Optional[str] = None, active: Optional[bool] = None,
-                    reset_mfa: bool = False) -> dict:
+                    reset_mfa: bool = False, all_orgs: Optional[bool] = None, org_ids: Optional[list] = None) -> dict:
         u = get_user_model().objects.filter(pk=user_id).first()
         if u is None:
             raise AccountError("Compte introuvable.")
@@ -205,6 +236,78 @@ class AccountService:
             u.is_active = bool(active)
         if reset_mfa:
             p.totp_enabled, p.totp_secret, p.totp_last_counter = False, None, None
+        if org_ids is not None:
+            p.org_ids = AccountService._clean_orgs(org_ids)
+        if all_orgs is not None:
+            p.all_orgs = bool(all_orgs)
+        if p.role == "client":
+            p.all_orgs = False
+            if not p.org_ids:
+                raise AccountError("Un compte Client doit être rattaché à au moins une organisation.")
         u.save()
         p.save()
         return next(x for x in AccountService.users() if x["id"] == u.pk)
+
+
+
+# ---------------------------------------------------------------- portée par organisation cliente
+def allowed_orgs_for(user) -> Optional[frozenset]:
+    """None = toutes les organisations. Administrateurs : toujours tout. Rôle Client : uniquement les siennes."""
+    import uuid as _uuid
+    if user.is_superuser:
+        return None
+    p = OperatorProfile.objects.filter(user=user).values("role", "all_orgs", "org_ids").first()
+    if p is None:
+        return None                           # compte sans profil = valeurs par défaut : lecture seule, tous les clients
+    if p["role"] == "admin" or (p["role"] in ("viewer", "operator") and p["all_orgs"]):
+        return None
+    out = set()
+    for o in p["org_ids"] or []:
+        try:
+            out.add(_uuid.UUID(str(o)))
+        except ValueError:
+            continue
+    return frozenset(out)
+
+
+def org_of_kwargs(kwargs: dict):
+    """Organisation visée par les identifiants d'une adresse d'API. None si l'adresse n'en contient pas ;
+    False si l'identifiant est inconnu (la vue renverra elle-même 404)."""
+    from module.insights.infrastructure.models import Alert
+    from module.microsoft_connector.infrastructure.models import MicrosoftConnector
+    from module.microsoft_outlook.infrastructure.models import Mailbox, OutlookRules
+    from module.protection.infrastructure.models import ProtectionEvent
+    if kwargs.get("org_id"):
+        return kwargs["org_id"]
+    lookups = (
+        ("connector_id", lambda v: MicrosoftConnector.objects.filter(pk=v).values_list("org_id", flat=True).first()),
+        ("mailbox_id", lambda v: Mailbox.objects.filter(pk=v).values_list("org_id", flat=True).first()),
+        ("rule_id", lambda v: OutlookRules.objects.filter(pk=v).values_list("mailbox__org_id", flat=True).first()),
+        ("alert_id", lambda v: Alert.objects.filter(pk=v).values_list("org_id", flat=True).first()),
+        ("event_id", lambda v: ProtectionEvent.objects.filter(pk=v).values_list("org_id", flat=True).first()),
+    )
+    for key, fn in lookups:
+        if kwargs.get(key):
+            try:
+                return fn(kwargs[key]) or False
+            except Exception:  # noqa: BLE001 : identifiant mal formé
+                return False
+    return None
+
+
+def request_scope(user, kwargs: dict) -> tuple[Optional[frozenset], bool]:
+    """(organisations permises, adresse hors portée ?) pour une requête authentifiée."""
+    import uuid as _uuid
+    from shared_kernel.tenancy import PUBLIC, current_schema
+    if current_schema() == PUBLIC:
+        return None, False
+    scope = allowed_orgs_for(user)
+    if scope is None:
+        return None, False
+    org = org_of_kwargs(kwargs or {})
+    if org is None or org is False:
+        return scope, False
+    try:
+        return scope, _uuid.UUID(str(org)) not in scope
+    except ValueError:
+        return scope, True

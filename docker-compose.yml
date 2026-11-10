@@ -11,6 +11,9 @@ x-backend: &backend
     REDIS_URL: redis://redis:6379/0
     # Accès depuis un autre poste du réseau : ajouter son adresse dans .env (ex. EXTRA_HOSTS=192.168.250.10)
     ALLOWED_HOSTS: localhost,127.0.0.1,backend${EXTRA_HOSTS:+,${EXTRA_HOSTS}}
+    # Multi-MSP (django-tenants) : <slug>.<TENANT_BASE_DOMAIN> mène au MSP ; frontend d'un MSP = APP_URL_TEMPLATE
+    TENANT_BASE_DOMAIN: ${TENANT_BASE_DOMAIN:-localhost}
+    APP_URL_TEMPLATE: ${APP_URL_TEMPLATE:-http://{host}:3000}
     # Adresses publiques (retour du consentement Microsoft, liens des notifications)
     API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:8000}
     APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}

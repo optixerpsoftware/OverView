@@ -5,7 +5,9 @@ from module.microsoft_identity.interface.views import (
     SecurityOverviewView, SecuritySyncView,
 )
 
-from module.microsoft_identity.interface.hygiene_views import HygieneAccountsView, HygieneAppView, HygieneView
+from module.microsoft_identity.interface.hygiene_views import (
+    HygieneAccountsView, HygieneAppTrafficView, HygieneAppView, HygieneView,
+)
 from module.microsoft_identity.interface.ca_views import CaTemplateView, ConditionalAccessView, SecurityDefaultsView
 from module.microsoft_identity.interface.device_policy_views import (
     DeviceRegistrationHistoryView, DeviceRegistrationView, DirectoryUsersView, SecurityGroupsView,
@@ -17,6 +19,7 @@ urlpatterns = [
     path('identity/connectors/<uuid:connector_id>/hygiene/', HygieneView.as_view()),
     path('identity/connectors/<uuid:connector_id>/hygiene/accounts/', HygieneAccountsView.as_view()),
     path('identity/connectors/<uuid:connector_id>/hygiene/apps/<str:sp_id>/', HygieneAppView.as_view()),
+    path('identity/connectors/<uuid:connector_id>/hygiene/apps/<str:sp_id>/traffic/', HygieneAppTrafficView.as_view()),
     path('identity/connectors/<uuid:connector_id>/conditional-access/', ConditionalAccessView.as_view()),
     path('identity/connectors/<uuid:connector_id>/conditional-access/security-defaults/', SecurityDefaultsView.as_view()),
     path('identity/connectors/<uuid:connector_id>/conditional-access/templates/', CaTemplateView.as_view()),

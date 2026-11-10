@@ -16,3 +16,9 @@ app.conf.imports = (
     'module.insights.interface.tasks',
     'module.protection.interface.tasks',
 )
+
+
+# Multi-MSP : le schéma du MSP qui publie une tâche voyage dans ses en-têtes et est réactivé par le worker.
+from shared_kernel.tenancy import install_celery_signals  # noqa: E402
+
+install_celery_signals()

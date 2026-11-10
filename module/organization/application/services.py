@@ -21,6 +21,8 @@ class OrganizationService:
         self.repo = repo or DjangoOrganizationRepository()
 
     def create(self, name: str, description: Optional[str] = None) -> OrganizationEntity:
+        from module.platform.limits import check
+        check("organizations")                 # limite d'organisations clientes de l'abonnement
         return self.repo.add(OrganizationEntity(name=name, description=description))
 
 

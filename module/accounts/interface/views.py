@@ -64,8 +64,8 @@ class UsersView(_View):
     async def post(self, request):
         b = _body(request)
         return Response(await db(AccountService.create_user)(
-            str(b.get("username", "")), str(b.get("password", "")), str(b.get("role", "viewer")), str(b.get("email", ""))),
-            status.HTTP_201_CREATED)
+            str(b.get("username", "")), str(b.get("password", "")), str(b.get("role", "viewer")), str(b.get("email", "")),
+            all_orgs=bool(b.get("all_orgs", True)), org_ids=list(b.get("org_ids") or [])), status.HTTP_201_CREATED)
 
 
 class UserDetailView(_View):
@@ -74,7 +74,8 @@ class UserDetailView(_View):
     async def patch(self, request, user_id):
         b = _body(request)
         return Response(await db(AccountService.update_user)(
-            request.user, user_id, role=b.get("role"), active=b.get("active"), reset_mfa=bool(b.get("reset_mfa"))))
+            request.user, user_id, role=b.get("role"), active=b.get("active"), reset_mfa=bool(b.get("reset_mfa")),
+            all_orgs=b.get("all_orgs"), org_ids=b.get("org_ids")))
 
 
 class RolePermission(BasePermission):
@@ -84,8 +85,16 @@ class RolePermission(BasePermission):
     def has_permission(self, request, view):
         if not (request.user and request.user.is_authenticated):
             return False
+        from django.http import Http404
+
+        from module.accounts.application.service import request_scope
+        from shared_kernel.scope import ALLOWED_ORGS
         denied = check_access(request.user, request.method, request.path)
         if denied:
             self.message = denied[1]
             return False
+        scope, outside = request_scope(request.user, getattr(view, "kwargs", {}) or {})
+        ALLOWED_ORGS.set(scope)           # même fil que la vue DRF : la portée s'applique à ses requêtes
+        if outside:
+            raise Http404
         return True

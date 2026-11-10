@@ -10,7 +10,8 @@ from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
-from shared_kernel.realtime import GROUP
+from shared_kernel.realtime import group_name
+from shared_kernel.tenancy import CURRENT_SCHEMA, TENANT_CLAIM, schema_for_host
 
 AUTH_FAILED = 4401   # code de fermeture applicatif : le client doit se reconnecter avec un jeton valide
 
@@ -36,16 +37,25 @@ class EventsConsumer(AsyncJsonWebsocketConsumer):
         self._expiry_task = None
         raw = parse_qs(self.scope.get("query_string", b"").decode()).get("token", [""])[0]
         await self.accept()                      # on accepte d'abord pour pouvoir renvoyer un code de fermeture précis
+        host = dict(self.scope.get("headers") or []).get(b"host", b"").decode()
+        self._schema = await database_sync_to_async(schema_for_host)(host)
+        if not self._schema:
+            await self.close(code=AUTH_FAILED)
+            return
+        CURRENT_SCHEMA.set(self._schema)        # pour toute la durée de la connexion (même tâche asyncio)
         try:
             token = AccessToken(raw)
         except TokenError:
+            await self.close(code=AUTH_FAILED)
+            return
+        if token.get(TENANT_CLAIM) != self._schema:   # jeton d'un autre MSP
             await self.close(code=AUTH_FAILED)
             return
         user = await _user_for(token)
         if user is None:
             await self.close(code=AUTH_FAILED)
             return
-        await self.channel_layer.group_add(GROUP, self.channel_name)
+        await self.channel_layer.group_add(group_name(self._schema), self.channel_name)
         self._joined = True
         delay = max(0.0, float(token["exp"]) - time.time())
         self._expiry_task = asyncio.create_task(self._close_at_expiry(delay))
@@ -60,7 +70,7 @@ class EventsConsumer(AsyncJsonWebsocketConsumer):
         if getattr(self, "_expiry_task", None):
             self._expiry_task.cancel()
         if getattr(self, "_joined", False):
-            await self.channel_layer.group_discard(GROUP, self.channel_name)
+            await self.channel_layer.group_discard(group_name(self._schema), self.channel_name)
 
     async def receive_json(self, content, **kwargs):
         if isinstance(content, dict) and content.get("type") == "ping":     # battement de cœur du client

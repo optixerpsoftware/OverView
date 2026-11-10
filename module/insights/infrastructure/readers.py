@@ -11,6 +11,8 @@ from typing import Optional
 
 from django.db.models import Q
 
+from shared_kernel.scope import scope_filter
+
 from module.microsoft_compliance.infrastructure.snapshot_models import ComplianceSnapshot
 from module.microsoft_connector.infrastructure.models import MicrosoftConnector
 from module.microsoft_identity.infrastructure.sync_models import IdentityHygieneSnapshot, MailboxSecuritySnapshot, SignInRecord
@@ -20,11 +22,11 @@ from module.organization.infrastructure.models import Organization
 
 
 def organizations() -> list[dict]:
-    return list(Organization.objects.order_by("name").values("id", "name", "description"))
+    return list(scope_filter(Organization.objects.order_by("name"), "id").values("id", "name", "description"))
 
 
 def connectors(org_id: Optional[uuid.UUID] = None, active_only: bool = False) -> list[dict]:
-    qs = MicrosoftConnector.objects.order_by("name")
+    qs = scope_filter(MicrosoftConnector.objects.order_by("name"))
     if org_id:
         qs = qs.filter(org_id=org_id)
     if active_only:
@@ -92,16 +94,16 @@ def compliance_scores(connector_id: uuid.UUID, days: int = 30) -> list[float]:
 
 # ---------------------------------------------------------------- recherche
 def search(q: str, limit: int = 8) -> dict:
-    orgs = list(Organization.objects.filter(Q(name__icontains=q) | Q(description__icontains=q))
+    orgs = list(scope_filter(Organization.objects.filter(Q(name__icontains=q) | Q(description__icontains=q)), "id")
                 .values("id", "name", "description")[:limit])
-    conns = list(MicrosoftConnector.objects.filter(name__icontains=q).values("id", "name", "org_id")[:limit])
+    conns = list(scope_filter(MicrosoftConnector.objects.filter(name__icontains=q)).values("id", "name", "org_id")[:limit])
     try:
-        conns += list(MicrosoftConnector.objects.filter(tenant_id=uuid.UUID(q)).values("id", "name", "org_id")[:1])
+        conns += list(scope_filter(MicrosoftConnector.objects.filter(tenant_id=uuid.UUID(q))).values("id", "name", "org_id")[:1])
     except ValueError:
         pass
-    boxes = list(Mailbox.objects.filter(user_principal_name__icontains=q)
+    boxes = list(scope_filter(Mailbox.objects.filter(user_principal_name__icontains=q))
                  .values("id", "user_principal_name", "connector_id")[:limit])
-    rules_ = list(OutlookRules.objects.filter(display_name__icontains=q)
+    rules_ = list(scope_filter(OutlookRules.objects.filter(display_name__icontains=q), "mailbox__org_id")
                   .values("id", "display_name", "mailbox_id", "mailbox__user_principal_name")[:limit])
     return {"orgs": orgs, "connectors": conns, "mailboxes": boxes, "rules": rules_}
 
@@ -109,8 +111,11 @@ def search(q: str, limit: int = 8) -> dict:
 def search_shared(q: str, limit: int = 8) -> list[dict]:
     """Fichiers partagés (dernier audit de chaque tenant) dont le nom, le chemin ou un destinataire correspond."""
     ql, out = q.lower(), []
+    permitted = {c["id"] for c in connectors()}
     for scan in SharingScan.objects.filter(status="done").order_by("connector_id", "-create_at").distinct("connector_id") \
             .values("connector_id", "records") if _supports_distinct_on() else _latest_scans():
+        if scan["connector_id"] not in permitted:
+            continue
         for r in scan["records"]:
             hay = f"{r.get('name', '')} {r.get('path', '')} {' '.join(r.get('grantees') or [])}".lower()
             if ql in hay:

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import timedelta
 from typing import Any, Callable, Optional
 
 from asgiref.sync import async_to_sync
+from django.utils import timezone
 
 from shared_kernel.aio import db
 from shared_kernel.realtime import publish
@@ -80,12 +82,32 @@ class SharingService:
     async def _actx(self, connector_id: uuid.UUID):
         return await db(self._ctx)(connector_id)
 
-    async def drives_async(self, connector_id: uuid.UUID) -> list[dict]:
-        _, gw = await self._actx(connector_id)
-        return await gw.list_drives()
+    DIRECTORY_MAX_AGE = timedelta(hours=12)
 
-    def drives(self, connector_id: uuid.UUID) -> list[dict]:
-        return async_to_sync(self.drives_async)(connector_id)
+    async def drives_async(self, connector_id: uuid.UUID, refresh: bool = False) -> dict:
+        """Espaces du tenant, depuis la liste mémorisée (instantané) ; relus chez Microsoft si demandé ou trop anciens."""
+        _, gw = await self._actx(connector_id)
+        cached = await db(self._directory)(connector_id)
+        if cached and not refresh and timezone.now() - cached["fetched_at"] < self.DIRECTORY_MAX_AGE:
+            return {**cached, "cached": True}
+        drives = await gw.list_drives()
+        return {**(await db(self._remember_directory)(connector_id, drives)), "cached": False}
+
+    def drives(self, connector_id: uuid.UUID, refresh: bool = False) -> dict:
+        return async_to_sync(self.drives_async)(connector_id, refresh)
+
+    @staticmethod
+    def _directory(connector_id) -> Optional[dict]:
+        from module.microsoft_onedrive.infrastructure.scan_models import DriveDirectory
+        d = DriveDirectory.objects.filter(connector_id=connector_id).first()
+        return {"drives": d.drives, "fetched_at": d.fetched_at} if d else None
+
+    @staticmethod
+    def _remember_directory(connector_id, drives: list[dict]) -> dict:
+        from module.microsoft_onedrive.infrastructure.scan_models import DriveDirectory
+        now = timezone.now()
+        DriveDirectory.objects.update_or_create(connector_id=connector_id, defaults={"drives": drives, "fetched_at": now})
+        return {"drives": drives, "fetched_at": now}
 
     def children(self, connector_id: uuid.UUID, drive_id: str, parent_id: Optional[str]) -> list[dict]:
         return async_to_sync(self.children_async)(connector_id, drive_id, parent_id)
@@ -190,6 +212,12 @@ class SharingService:
 
     async def _scan(self, gw: DriveGateway, scan_id: Optional[uuid.UUID] = None):
         domains, drives = await asyncio.gather(gw.internal_domains(), gw.list_drives())
+        if scan_id:     # l'audit relit tous les espaces : on en profite pour rafraîchir la liste de l'explorateur
+            connector_id = await db(lambda: __import__("module.microsoft_onedrive.infrastructure.scan_models",
+                                                       fromlist=["SharingScan"]).SharingScan.objects.filter(pk=scan_id)
+                                    .values_list("connector_id", flat=True).first())()
+            if connector_id:
+                await db(self._remember_directory)(connector_id, drives)
         sem = asyncio.Semaphore(6)
         records: list[dict] = []
         truncated: list[str] = []

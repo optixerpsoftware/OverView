@@ -37,6 +37,8 @@ class ConnectorService:
                  client_secret: str, is_active: bool = True) -> ConnectorEntity:
         if not self.orgs.exists(org_id):
             raise OrganizationNotFound(str(org_id))
+        from module.platform.limits import check
+        check("tenants")                       # limite de tenants Microsoft 365 de l'abonnement du MSP
         return self.repo.add(ConnectorEntity(
             org_id=org_id, name=name, tenant_id=tenant_id, client_id=client_id,
             client_secret=client_secret, is_active=is_active,

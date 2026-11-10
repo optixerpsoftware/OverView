@@ -1,4 +1,5 @@
 from rest_framework import status, viewsets
+from shared_kernel.scope import OrgScopedQuerysetMixin
 from shared_kernel.async_api import AsyncAPIView, Response as AsyncResponse, status as http
 from rest_framework.response import Response
 
@@ -10,7 +11,7 @@ from module.microsoft_connector.infrastructure.models import MicrosoftConnector
 from module.microsoft_connector.interface.serializers import MicrosoftConnectorSerializer
 
 
-class MicrosoftConnectorViewSet(viewsets.ModelViewSet):
+class MicrosoftConnectorViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     """Lectures via le queryset (CQRS léger) ; écritures métier via ConnectorService."""
     queryset = MicrosoftConnector.objects.all().order_by('name')
     serializer_class = MicrosoftConnectorSerializer

@@ -7,6 +7,8 @@ class OperatorProfile(models.Model):
     """Rôle et MFA d'un compte OverView. La clé TOTP est chiffrée en base."""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="overview_profile")
     role = models.CharField(max_length=10, default="viewer")
+    all_orgs = models.BooleanField(default=True)        # False : seulement les organisations de `org_ids`
+    org_ids = models.JSONField(default=list)            # organisations clientes permises (rôle Client : la sienne)
     totp_secret = EncryptedCharField(max_length=64, blank=True, null=True)
     totp_enabled = models.BooleanField(default=False)
     totp_last_counter = models.BigIntegerField(null=True, blank=True)   # anti-rejeu : dernier code accepté

@@ -2,6 +2,7 @@
 import { use, useState } from 'react';
 import Breadcrumb from '../../../components/Breadcrumb';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import AppTraffic from '../../../components/AppTraffic';
 import Loading from '../../../components/Loading';
 import { api } from '../../../lib/api';
 import { ago } from '../../../lib/alerts';
@@ -12,6 +13,7 @@ interface Admin { upn: string; name: string; roles: string[]; mfa: boolean | nul
 interface App {
   id: string; name: string; publisher: string; verified: boolean; enabled: boolean; created: string | null;
   risk: 'high' | 'medium' | 'low' | 'info'; high_risk_scopes: string[]; unverified_warning?: boolean;
+  activity?: { last: string | null; delegated: string | null; app_only: string | null; days_since: number | null; dormant: boolean };
   delegated: { resource: string; scopes: string[]; who: string; all_users: boolean }[];
   application: { resource: string; permission: string }[];
 }
@@ -34,6 +36,12 @@ export default function IdentityHygienePage({ params }: { params: Promise<{ id: 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmAccounts, setConfirmAccounts] = useState(false);
   const [appTarget, setAppTarget] = useState<App | null>(null);
+  const [appDelete, setAppDelete] = useState<App | null>(null);
+  const [trafficFor, setTrafficFor] = useState<string | null>(null);
+  const removeApp = useApiMutation(
+    (a: App) => api(`${base}apps/${a.id}/`, { method: 'DELETE', body: { confirm: 'SUPPRIMER' } }),
+    { invalidate: [base, '/insights/'], success: (_, a) => `« ${a.name} » supprimée du tenant.`, onSuccess: () => setAppDelete(null) },
+  );
 
   const scan = useApiMutation(() => api(base, { method: 'POST' }), { invalidate: [base, '/insights/'], success: 'Analyse terminée.' });
   const disable = useApiMutation(
@@ -140,6 +148,11 @@ export default function IdentityHygienePage({ params }: { params: Promise<{ id: 
                       <span className="finding-title">{a.name}</span>
                       <span className="finding-sum sub">{a.verified ? `✔ ${a.publisher}` : `Éditeur non vérifié${a.publisher ? ` (${a.publisher})` : ''}`}</span>
                       {!a.enabled && <span className="badge off">Bloquée</span>}
+                      {a.activity && (!a.activity.last
+                        ? <span className="badge warn" title="Microsoft n’a enregistré aucune connexion de cette application">Aucune activité connue</span>
+                        : a.activity.dormant
+                          ? <span className="badge warn" title={`Dernière utilisation le ${new Date(a.activity.last).toLocaleDateString()}`}>Inutilisée depuis {a.activity.days_since} j</span>
+                          : <span className="sub" title={new Date(a.activity.last).toLocaleString()}>Utilisée {ago(a.activity.last)}</span>)}
                     </summary>
                     <div className="finding-body">
                       {a.high_risk_scopes.length > 0 && <p><strong>Permissions sensibles :</strong> {a.high_risk_scopes.join(', ')}</p>}
@@ -149,12 +162,20 @@ export default function IdentityHygienePage({ params }: { params: Promise<{ id: 
                       {a.delegated.map((d, i) => (
                         <p key={i}>Au nom de <strong>{d.who}</strong> : {d.scopes.join(', ')} <span className="sub">({d.resource})</span></p>
                       ))}
-                      <div className="sub">Autorisée {a.created ? `le ${new Date(a.created).toLocaleDateString()}` : ''}</div>
-                      <div style={{ marginTop: 8 }}>
-                        {a.enabled
-                          ? <button className="danger" onClick={() => setAppTarget(a)}>Bloquer la connexion de l’application</button>
-                          : <button onClick={() => toggleApp.mutate({ app: a, enabled: true })}>Rétablir</button>}
+                      <div className="sub">
+                        Autorisée {a.created ? `le ${new Date(a.created).toLocaleDateString()}` : ''}
+                        {a.activity && <> · dernière utilisation : {a.activity.last ? ago(a.activity.last) : 'aucune enregistrée par Microsoft'}
+                          {a.activity.delegated && <> (utilisateurs {ago(a.activity.delegated)})</>}
+                          {a.activity.app_only && <> (sans utilisateur {ago(a.activity.app_only)})</>}</>}
                       </div>
+                      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button onClick={() => setTrafficFor(trafficFor === a.id ? null : a.id)}>{trafficFor === a.id ? 'Masquer le trafic' : 'Voir le trafic'}</button>
+                        {a.enabled
+                          ? <button className="danger" onClick={() => setAppTarget(a)}>Bloquer (réversible)</button>
+                          : <button onClick={() => toggleApp.mutate({ app: a, enabled: true })}>Rétablir</button>}
+                        <button className="danger-solid" onClick={() => setAppDelete(a)}>Supprimer l’application</button>
+                      </div>
+                      {trafficFor === a.id && <AppTraffic connectorId={id} spId={a.id} />}
                     </div>
                   </details>
                 ))}
@@ -214,6 +235,19 @@ export default function IdentityHygienePage({ params }: { params: Promise<{ id: 
           <p>
             Ces comptes ne pourront plus se connecter. Rien n’est supprimé : boîte, fichiers et licence restent en place, et le
             compte peut être réactivé dans Microsoft 365. Les administrateurs sont refusés par sécurité.
+          </p>
+        </ConfirmDialog>
+      )}
+      {appDelete && (
+        <ConfirmDialog title={`Supprimer « ${appDelete.name} » du tenant`} confirmLabel="Supprimer l’application" requireText="SUPPRIMER"
+          busy={removeApp.isPending} onCancel={() => setAppDelete(null)} onConfirm={() => removeApp.mutate(appDelete)}>
+          <p>
+            L’application est retirée du tenant avec <strong>toutes ses permissions et tous les consentements</strong> donnés par les
+            utilisateurs ou un administrateur. Ses accès cessent immédiatement.
+          </p>
+          <p className="sub">
+            Elle pourra être réinstallée plus tard, mais il faudra redonner les consentements. Si tu veux seulement couper l’accès
+            le temps de vérifier, préfère « Bloquer (réversible) ». Action journalisée.
           </p>
         </ConfirmDialog>
       )}

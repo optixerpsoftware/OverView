@@ -17,6 +17,38 @@ Services : `db` (PostgreSQL), `redis`, `backend` (Daphne, API + WebSocket), `wor
 `frontend` (Next.js). Les synchronisations tournent en arrière-plan (sécurité des comptes et alertes toutes les
 10 min, règles Outlook toutes les 15 min, gouvernance et partage une fois par jour).
 
+## Multi-MSP (django-tenants)
+
+OverView héberge plusieurs MSP sur une seule installation : **chaque MSP a son propre schéma PostgreSQL** (ses
+organisations clientes, comptes OverView, connecteurs, alertes…), totalement séparé des autres.
+
+- **Adresses** : `<slug>.<TENANT_BASE_DOMAIN>` mène au MSP (ex. `acme.overview.ca`). En développement,
+  `acme.localhost:3000` fonctionne sans configuration DNS. La plateforme (inscription) répond sur
+  `platform.<TENANT_BASE_DOMAIN>`.
+- **Isolation** : le schéma est choisi pour chaque requête d'après l'adresse, et réappliqué avant chaque requête SQL
+  (sûr même quand Daphne traite en parallèle des requêtes de MSP différents). Les jetons de connexion sont liés au MSP
+  (refusés ailleurs) et les événements temps réel sont diffusés par MSP.
+- **Tâches de fond** : chaque tâche planifiée parcourt tous les MSP ; une tâche lancée depuis un MSP ne concerne que lui.
+- **Créer un MSP** :
+
+  ```bash
+  docker compose exec backend python manage.py create_msp acme --name "Acme TI" --admin admin --email admin@acme.ca
+  ```
+
+  ou depuis la **console de la plateforme** (`http://platform.<domaine>:3000`). Aucune inscription en libre-service :
+  seul un super-administrateur de la plateforme crée un MSP. Premier super-administrateur :
+  `docker compose exec -it backend python manage.py create_platform_admin <nom>` (MFA obligatoire).
+- **Variables** (`.env`) : `TENANT_BASE_DOMAIN` (défaut `localhost`), `APP_URL_TEMPLATE` (défaut
+  `http://{host}:3000`, adresse du frontend d'un MSP pour les retours et les liens).
+- **Passage d'une installation existante** (déjà fait pour Updo) : `bootstrap_tenancy` crée le MSP d'origine et y copie
+  les données ; les tables restées dans `public` ne sont pas supprimées. Une sauvegarde est faite avant
+  (`pg_dump -Fc`), dans `backups/` (exclu de Git).
+- **Tests** : PostgreSQL est maintenant requis.
+
+  ```bash
+  docker compose run --rm --no-deps -v "$PWD:/app" backend python manage.py test
+  ```
+
 ## Connecter un tenant Microsoft 365 en un clic (consentement administrateur)
 
 Au lieu de créer une inscription d'application dans **chaque** tenant client et de recopier son ID et son secret,

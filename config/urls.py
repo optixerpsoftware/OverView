@@ -2,10 +2,13 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from module.platform.interface.views import SubscriptionView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     # Connexion : mot de passe puis code TOTP si le MFA est activé (l'émission directe de jetons SimpleJWT est retirée).
     path('api/', include('module.accounts.interface.urls')),
+    path('api/subscription/', SubscriptionView.as_view()),
     path('api/auth/token/refresh/', TokenRefreshView.as_view()),
     path('api/', include('module.organization.interface.urls')),
     path('api/', include('module.microsoft_connector.interface.urls')),
