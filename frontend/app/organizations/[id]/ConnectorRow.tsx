@@ -69,6 +69,8 @@ export default function ConnectorRow({ connector: c, onChanged, onMessage }: Pro
       <Link href={`/mailflow/${c.id}`} className="btn">Messagerie</Link>
       <Menu items={[
         { label: 'Tester la connexion', onClick: () => void test() },
+        { label: 'Accès conditionnel', onClick: () => router.push(`/conditional-access/${c.id}`) },
+        { label: 'Hygiène des identités', onClick: () => router.push(`/identity-hygiene/${c.id}`) },
         { label: 'Inscription des appareils', onClick: () => router.push(`/device-registration/${c.id}`) },
         { label: 'Changer le secret', onClick: () => setEditing(!editing) },
         { label: 'Supprimer', danger: true, onClick: () => setConfirming(true) },

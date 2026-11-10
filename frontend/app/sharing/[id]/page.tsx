@@ -5,6 +5,7 @@ import DriveExplorer from '../../../components/DriveExplorer';
 import SharingAudit from '../../../components/SharingAudit';
 import type { Connector } from '../../../lib/types';
 import { useApi } from '../../../lib/useApi';
+import Breadcrumb from '../../../components/Breadcrumb';
 
 type Tab = 'audit' | 'explorer';
 
@@ -15,7 +16,7 @@ export default function SharingPage({ params }: { params: Promise<{ id: string }
 
   return (
     <>
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › Partage OneDrive &amp; SharePoint</div>
+      <Breadcrumb current="Partage OneDrive & SharePoint" />
       <header className="hero">
         <div className="avatar-lg" aria-hidden="true">🔗</div>
         <div className="hero-id">

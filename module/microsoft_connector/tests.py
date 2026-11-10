@@ -58,7 +58,7 @@ class ConnectorAsyncViewTests(TransactionTestCase):
         self.org = await Organization.objects.acreate(name="Org")
         self.conn = await MicrosoftConnector.objects.acreate(
             org_id=self.org.id, name="c", tenant_id=uuid.uuid4(), client_id=uuid.uuid4(), client_secret="s")
-        u = await get_user_model().objects.acreate(username="op")
+        u = await get_user_model().objects.acreate(username="op", is_superuser=True)
         self.h = {"Authorization": f"Bearer {AccessToken.for_user(u)}"}
 
     async def test_test_endpoint_over_http(self):

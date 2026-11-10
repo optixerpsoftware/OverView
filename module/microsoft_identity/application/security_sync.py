@@ -193,6 +193,8 @@ class SecuritySyncService:
             raise
 
         old = self.repo.get(mailbox.id) or {}
+        if not isinstance(methods, BaseException):
+            self._record_method_changes(mailbox, old, _jsonable(methods))
         # Une section en erreur conserve ses dernières données connues (et affiche l'erreur).
         self.repo.save_snapshot(
             mailbox.id, profile=_jsonable(profile),
@@ -209,6 +211,23 @@ class SecuritySyncService:
         self.repo.finish(mailbox.id)
         self._notify(mailbox.id)
         return {"new_sign_ins": added, "since": since.isoformat()}
+
+    @staticmethod
+    def _record_method_changes(mailbox, old: dict, new_methods: list) -> None:
+        """Note les méthodes MFA ajoutées / retirées depuis la synchro précédente. Rien à la toute première synchro
+        (pas de référence) ni si la lecture précédente était en erreur (on comparerait à une liste incomplète)."""
+        from module.microsoft_identity.infrastructure.sync_models import AuthMethodChange
+        if not old or old.get("auth_methods_error") or not old.get("last_synced_at"):
+            return
+        before = {m.get("id"): m for m in old.get("auth_methods") or []}
+        after = {m.get("id"): m for m in new_methods or []}
+        now = dj_timezone.now()
+        rows = [AuthMethodChange(mailbox_id=mailbox.id, org_id=mailbox.org_id, method_id=str(i)[:128], kind=m.get("kind", "")[:40],
+                                 label=(m.get("label") or "")[:200], detail=(m.get("detail") or "")[:300], change=change, at=now)
+                for change, ids, src in (("added", after.keys() - before.keys(), after), ("removed", before.keys() - after.keys(), before))
+                for i in ids for m in [src[i]] if m.get("kind") != "password"]
+        if rows:
+            AuthMethodChange.objects.bulk_create(rows)
 
     def sync_all(self) -> dict:
         """Planifie la synchro de tous les comptes actifs (appelé toutes les 10 minutes par le worker).

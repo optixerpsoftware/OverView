@@ -44,6 +44,9 @@ class SharingScanRepository(ABC):
     def finish(self, scan_id: uuid.UUID, *, records: list[dict], summary: dict, truncated: list[str],
                errors: list[str]) -> dict: ...
 
+    def progress(self, scan_id: uuid.UUID, progress: dict) -> None:  # facultatif : avancement affiché pendant l'analyse
+        return None
+
     @abstractmethod
     def fail(self, scan_id: uuid.UUID, error: str) -> None: ...
 

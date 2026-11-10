@@ -264,30 +264,76 @@ class IdentityService:
     def reset_password(self, mailbox_id: uuid.UUID, by: str, confirm: Optional[str], force_change: bool = True) -> str:
         return async_to_sync(self.reset_password_async)(mailbox_id, by, confirm, force_change)
 
-    async def emergency_async(self, mailbox_id: uuid.UUID, by: str,
-                              confirm: Optional[str]) -> tuple[list[StepResult], Optional[str]]:
+    async def emergency_async(self, mailbox_id: uuid.UUID, by: str, confirm: Optional[str],
+                              options: Optional[dict] = None) -> tuple[list[StepResult], Optional[str]]:
         """Pipeline d'urgence (compte compromis), au mieux de ses possibilités :
         1. déconnexion de toutes les sessions
-        2. nouveau mot de passe généré (changement forcé à la prochaine connexion)
-        3. nouvelle déconnexion (invalide les jetons émis pendant l'opération)
+        2. purge de TOUTES les méthodes MFA (l'attaquant a pu ajouter son téléphone ou son Authenticator)
+        3. suppression de TOUS les appareils enregistrés ou joints au nom du compte
+        4. (par défaut) suppression des règles Outlook qui transfèrent vers l'extérieur + retrait du transfert SMTP de boîte
+        5. nouveau mot de passe généré (changement forcé à la prochaine connexion)
+        6. nouvelle déconnexion (invalide les jetons émis pendant l'opération)
+        7. (option) désactivation du compte ; (option) passe d'accès temporaire pour la réinscription MFA
+        Options : {"remove_forwarding": True, "disable_account": False, "create_tap": False}.
         Une étape en échec n'interrompt pas les suivantes ; le mot de passe n'est
-        renvoyé que si l'étape 2 a réussi."""
+        renvoyé que si l'étape 4 a réussi. Le mot de passe (méthode « password ») n'est jamais supprimé."""
         mailbox, gw = await self._acontext(mailbox_id)
         self._check_confirmation(mailbox, confirm)
+        opts = {"remove_forwarding": True, "disable_account": False, "create_tap": False, **(options or {})}
         upn = mailbox.user_principal_name
         steps: list[StepResult] = []
         password: Optional[str] = None
+        self.last_tap = None
 
         async def step(name: str, label: str, action) -> bool:
             try:
-                await action()
-                steps.append(StepResult(label, True))
-                await self._alog(mailbox, f"emergency:{name}", True, "", by)
+                detail = await action() or ""
+                steps.append(StepResult(label, True, detail))
+                await self._alog(mailbox, f"emergency:{name}", True, detail, by)
                 return True
             except Exception as e:
                 steps.append(StepResult(label, False, _err(e)))
                 await self._alog(mailbox, f"emergency:{name}", False, _err(e), by)
                 return False
+
+        async def purge_mfa() -> str:
+            """Supprime toutes les méthodes sauf le mot de passe. Microsoft refuse parfois de supprimer la méthode
+            par défaut tant qu'il en reste d'autres : un second passage reprend les échecs du premier."""
+            methods = [m for m in await gw.list_auth_methods(upn) if m.kind in DELETABLE_KINDS]
+            if not methods:
+                return "Aucune méthode MFA à supprimer."
+            removed, pending, errors = [], list(methods), {}
+            for _ in range(2):
+                retry = []
+                for m in pending:
+                    try:
+                        await gw.delete_auth_method(upn, m.kind, m.id)
+                        removed.append(m.label + (f" ({m.detail})" if m.detail else ""))
+                        errors.pop(m.id, None)
+                    except Exception as e:  # noqa: BLE001
+                        errors[m.id] = f"{m.label} : {_err(e)}"
+                        retry.append(m)
+                pending = retry
+                if not pending:
+                    break
+            if pending:
+                raise RuntimeError(f"{len(removed)} supprimée(s), {len(pending)} en échec — " + " ; ".join(errors.values()))
+            return f"{len(removed)} méthode(s) supprimée(s) : " + ", ".join(removed)
+
+        async def delete_devices() -> str:
+            devices = await gw.list_devices(upn)
+            if not devices:
+                return "Aucun appareil enregistré."
+            removed, failed = [], []
+            for d in devices:
+                try:
+                    await gw.delete_device(d.id)
+                    removed.append(d.display_name or d.id)
+                except Exception as e:  # noqa: BLE001
+                    failed.append(f"{d.display_name or d.id} : {_err(e)}")
+            if failed:
+                raise RuntimeError(f"{len(removed)} supprimé(s), {len(failed)} en échec — " + " ; ".join(failed))
+            return f"{len(removed)} appareil(s) supprimé(s) : " + ", ".join(removed)
 
         async def reset():
             nonlocal password
@@ -296,10 +342,41 @@ class IdentityService:
             password = pw  # affecté seulement après succès
 
         await step("revoke_1", "Déconnexion de toutes les sessions", lambda: gw.revoke_sessions(upn))
+        await step("purge_mfa", "Suppression de toutes les méthodes MFA", purge_mfa)
+        await step("delete_devices", "Suppression de tous les appareils", delete_devices)
+        async def remove_forwarding() -> str:
+            domains = {d.lower() for d in await gw.internal_domains()} or {upn.rsplit("@", 1)[-1].lower()}
+            removed = []
+            for r in await gw.list_message_rules(upn):
+                acts = r.get("actions") or {}
+                targets = [((a or {}).get("emailAddress") or {}).get("address", "")
+                           for k in ("forwardTo", "forwardAsAttachmentTo", "redirectTo") for a in acts.get(k) or []]
+                ext = [t for t in targets if t and t.rsplit("@", 1)[-1].lower() not in domains]
+                if ext:
+                    await gw.delete_message_rule(upn, r["id"])
+                    removed.append(f"« {r.get('displayName', '?')} » → {', '.join(ext)}")
+            parts = [f"{len(removed)} règle(s) de transfert supprimée(s)" + (f" : {'; '.join(removed)}" if removed else "")]
+            try:
+                parts.append("transfert SMTP de boîte retiré" if await gw.clear_mailbox_forwarding(upn) else "aucun transfert SMTP de boîte")
+            except Exception as e:  # noqa: BLE001 : Exchange non accessible → les règles restent traitées
+                parts.append(f"transfert SMTP non vérifié ({_err(e)})")
+            return " · ".join(parts)
+
+        async def create_tap() -> str:
+            self.last_tap = await gw.create_temporary_access_pass(upn, 480, True)
+            return "Passe d'accès temporaire créé (8 h, usage unique), affiché une seule fois."
+
+        if opts["remove_forwarding"]:
+            await step("remove_forwarding", "Suppression des transferts vers l'extérieur", remove_forwarding)
         await step("reset_password", "Nouveau mot de passe (changement forcé à la connexion)", reset)
         await step("revoke_2", "Seconde déconnexion des sessions", lambda: gw.revoke_sessions(upn))
+        if opts["disable_account"]:
+            await step("disable_account", "Désactivation du compte", lambda: gw.set_account_enabled(upn, False))
+        if opts["create_tap"]:
+            await step("create_tap", "Passe d'accès temporaire pour la réinscription MFA", create_tap)
         await db(self._changed)(mailbox.id)
         return steps, password
 
-    def emergency(self, mailbox_id: uuid.UUID, by: str, confirm: Optional[str]) -> tuple[list[StepResult], Optional[str]]:
-        return async_to_sync(self.emergency_async)(mailbox_id, by, confirm)
+    def emergency(self, mailbox_id: uuid.UUID, by: str, confirm: Optional[str],
+                  options: Optional[dict] = None) -> tuple[list[StepResult], Optional[str]]:
+        return async_to_sync(self.emergency_async)(mailbox_id, by, confirm, options)

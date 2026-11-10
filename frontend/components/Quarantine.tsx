@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import type { QuarantineAction, QuarantinedMessage, QuarantineResult } from '../lib/types';
 import { useApi, useApiMutation, SLOW } from '../lib/useApi';
 import ConfirmDialog from './ConfirmDialog';
+import Loading from './Loading';
 
 const TYPES: [string, string][] = [
   ['', 'Tous les types'], ['Spam', 'Courrier indésirable'], ['Phish', 'Hameçonnage'], ['HighConfPhish', 'Hameçonnage (haute confiance)'],
@@ -58,7 +59,7 @@ export default function Quarantine({ connectorId }: { connectorId: string }) {
       </div>
 
       {list.error && <div className="messagebar error">{list.error}</div>}
-      {list.loading && <div className="sub">Interrogation d’Exchange Online…</div>}
+      {list.loading && <Loading label="Interrogation d’Exchange Online…" lines={5} />}
 
       {showLog && (
         <table className="grid">

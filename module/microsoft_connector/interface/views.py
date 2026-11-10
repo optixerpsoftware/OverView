@@ -67,3 +67,47 @@ class TestConnectorView(AsyncAPIView):
         if isinstance(exc, ConnectorNotFound):
             return AsyncResponse(status=http.HTTP_404_NOT_FOUND)
         return super().handle_exception(exc)
+
+
+# ---------------------------------------------------------------- connexion par consentement administrateur
+from django.http import HttpResponseRedirect  # noqa: E402
+
+from module.microsoft_connector.application.consent_service import ConsentNotConfigured, ConsentService  # noqa: E402
+from shared_kernel.aio import db  # noqa: E402
+
+
+class ConsentConfigView(AsyncAPIView):
+    """GET : la connexion « en un clic » est-elle configurée ? (et l'URI de redirection à déclarer dans Azure)."""
+
+    async def get(self, request):
+        return AsyncResponse(ConsentService.config())
+
+
+class ConsentStartView(AsyncAPIView):
+    """POST {org_id, name?, tenant_hint?} → {url} : adresse Microsoft où envoyer l'administrateur du client."""
+
+    def handle_exception(self, exc):
+        if isinstance(exc, ConsentNotConfigured):
+            return AsyncResponse({"detail": str(exc)}, http.HTTP_503_SERVICE_UNAVAILABLE)
+        if isinstance(exc, OrganizationNotFound):
+            return AsyncResponse({"detail": "Organisation introuvable."}, http.HTTP_404_NOT_FOUND)
+        if isinstance(exc, ValueError):
+            return AsyncResponse({"detail": "Identifiant d'organisation invalide."}, http.HTTP_400_BAD_REQUEST)
+        return super().handle_exception(exc)
+
+    async def post(self, request):
+        import uuid as _uuid
+        body = request.data if isinstance(request.data, dict) else {}
+        url = await db(ConsentService().start)(
+            org_id=_uuid.UUID(str(body.get("org_id", ""))), name=str(body.get("name", "")),
+            by=request.user.get_username(), tenant_hint=str(body.get("tenant_hint", "")).strip())
+        return AsyncResponse({"url": url})
+
+
+class ConsentCallbackView(AsyncAPIView):
+    """GET : retour de Microsoft après le consentement (navigateur, sans jeton JWT : la sécurité repose sur `state`,
+    signé, limité à 15 min et à usage unique). Redirige toujours vers le frontend avec le résultat."""
+    authentication_required = False
+
+    async def get(self, request):
+        return HttpResponseRedirect(await ConsentService().complete_async(request.GET))

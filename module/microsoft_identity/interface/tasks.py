@@ -14,3 +14,10 @@ def sync_mailbox_security(mailbox_id: str) -> dict:
 def sync_all_mailboxes_security() -> dict:
     """Planifié toutes les 10 minutes : met en file la synchro de chaque compte actif."""
     return SecuritySyncService().sync_all()
+
+
+@shared_task
+def scan_all_identity_hygiene() -> dict:
+    """Une fois par jour : comptes inactifs, invités, administrateurs et applications tierces de chaque tenant."""
+    from module.microsoft_identity.application.hygiene_service import HygieneService
+    return HygieneService().scan_all()

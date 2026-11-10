@@ -1,7 +1,7 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
-import type { Note, Risk, ShareRecord, SharingScan, SharingSummary } from '../lib/types';
+import type { BulkResult, Note, Risk, ShareRecord, SharingScan, SharingSummary } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import ConfirmDialog from './ConfirmDialog';
 import { RISK_LABEL, RISK_ORDER, shareLabel } from './ShareLabel';
@@ -22,6 +22,15 @@ export default function SharingAudit({ connectorId }: { connectorId: string }) {
   const [toRevoke, setToRevoke] = useState<ShareRecord | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Lien depuis la recherche globale : ?q=nom du fichier pré-remplit le filtre.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('q');
+    if (q) setQuery(q);
+  }, []);
 
   const scan = latest.data;
   const running = scan?.status === 'running';
@@ -60,6 +69,28 @@ export default function SharingAudit({ connectorId }: { connectorId: string }) {
     }
   }
 
+  async function revokeSelected() {
+    const chosen = records.filter((r) => selected.has(key(r)));
+    setBulkBusy(true);
+    try {
+      const res = await api<BulkResult>('/insights/bulk/sharing/revoke/', {
+        method: 'POST',
+        body: { connector_id: connectorId, confirm: 'REVOQUER',
+          items: chosen.map((r) => ({ drive_id: r.drive_id, item_id: r.item_id, permission_id: r.permission_id })) },
+      });
+      const ok = new Set(res.results.filter((x) => x.ok).map((x) => x.id));
+      setRemoved((prev) => { const n = new Set(prev); chosen.forEach((r) => { if (ok.has(key(r))) n.add(key(r)); }); return n; });
+      setSelected(new Set());
+      const failures = res.results.filter((x) => !x.ok).map((x) => x.error).slice(0, 2).join(' ; ');
+      setNote({ text: `${res.succeeded} partage(s) révoqué(s)${res.failed ? `, ${res.failed} en échec : ${failures}` : ''}.`, error: res.failed > 0 });
+    } catch (e) {
+      setNote({ text: errorMessage(e), error: true });
+    } finally {
+      setBulkBusy(false);
+      setBulkOpen(false);
+    }
+  }
+
   const records = useMemo(() => (scan?.records ?? []).filter((r) => !removed.has(key(r))), [scan, removed]);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -93,6 +124,14 @@ export default function SharingAudit({ connectorId }: { connectorId: string }) {
       {running && (
         <div className="messagebar">
           L&apos;audit parcourt tous les OneDrive et bibliothèques SharePoint ; cela peut prendre quelques minutes. Tu peux quitter la page : il continue dans le worker.
+          {!!scan?.progress?.drives_total && (
+            <div style={{ marginTop: 8 }}>
+              <progress value={scan.progress.drives_done ?? 0} max={scan.progress.drives_total} style={{ width: '100%' }} />
+              <div className="sub">
+                {scan.progress.drives_done ?? 0} / {scan.progress.drives_total} espaces analysés · {scan.progress.records ?? 0} partage(s) trouvé(s) jusqu&apos;ici
+              </div>
+            </div>
+          )}
         </div>
       )}
       {scan?.status === 'failed' && <div className="messagebar error">Échec de l&apos;audit : {scan.error}</div>}
@@ -141,12 +180,36 @@ export default function SharingAudit({ connectorId }: { connectorId: string }) {
               <input placeholder="Filtrer par nom, chemin, espace ou destinataire…" value={query}
                 onChange={(e) => { setQuery(e.target.value); setLimit(PAGE); }} />
             </div>
+            {selected.size > 0 && (
+              <div className="bulkbar" role="region" aria-label="Actions sur la sélection">
+                <strong>{selected.size} partage(s) sélectionné(s)</strong>
+                <button className="danger-solid" onClick={() => setBulkOpen(true)}>Révoquer la sélection</button>
+                <button className="ghost" onClick={() => setSelected(new Set())}>Annuler la sélection</button>
+              </div>
+            )}
             {shown.length === 0 ? <div className="empty">Aucun partage ne correspond.</div> : (
               <table className="grid">
-                <thead><tr><th>Risque</th><th>Élément</th><th>Partage</th><th /></tr></thead>
+                <thead><tr>
+                  <th style={{ width: 32 }}>
+                    <input type="checkbox" aria-label="Sélectionner les partages affichés (100 au maximum)"
+                      checked={shown.slice(0, limit).length > 0 && shown.slice(0, Math.min(limit, 100)).every((r) => selected.has(key(r)))}
+                      onChange={(e) => setSelected(() => {
+                        const n = new Set<string>();
+                        if (e.target.checked) shown.slice(0, Math.min(limit, 100)).forEach((r) => n.add(key(r)));
+                        return n;
+                      })} />
+                  </th>
+                  <th>Risque</th><th>Élément</th><th>Partage</th><th />
+                </tr></thead>
                 <tbody>
                   {shown.slice(0, limit).map((r) => (
                     <tr key={key(r)}>
+                      <td><input type="checkbox" aria-label={`Sélectionner ${r.name}`} checked={selected.has(key(r))}
+                        onChange={() => setSelected((prev) => {
+                          const n = new Set(prev);
+                          if (n.has(key(r))) n.delete(key(r)); else if (n.size < 100) n.add(key(r));
+                          return n;
+                        })} /></td>
                       <td><span className={`badge ${RISK_LABEL[r.risk].cls}`}>{RISK_LABEL[r.risk].label}</span></td>
                       <td style={{ maxWidth: 360, wordBreak: 'break-word' }}>
                         {r.is_folder ? '📁 ' : '📄 '}<strong>{r.name}</strong>
@@ -176,6 +239,23 @@ export default function SharingAudit({ connectorId }: { connectorId: string }) {
             )}
           </section>
         </>
+      )}
+
+      {bulkOpen && (
+        <ConfirmDialog
+          title={`Révoquer ${selected.size} partage(s)`}
+          confirmLabel="Révoquer la sélection"
+          requireText="REVOQUER"
+          busy={bulkBusy}
+          onConfirm={() => void revokeSelected()}
+          onCancel={() => setBulkOpen(false)}
+        >
+          <p>
+            Les <strong>{selected.size}</strong> partages sélectionnés seront supprimés <strong>dans Microsoft 365</strong>.
+            Les personnes qui utilisaient ces liens perdront l&apos;accès. Chaque suppression est revérifiée et journalisée ;
+            les partages hérités ou du propriétaire sont refusés. Action irréversible.
+          </p>
+        </ConfirmDialog>
       )}
 
       {toRevoke && (

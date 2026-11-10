@@ -15,6 +15,7 @@ class SharingScan(BaseModel):
     records = models.JSONField(default=list)
     truncated = models.JSONField(default=list)   # drives dont le parcours a été limité
     errors = models.JSONField(default=list)      # drives illisibles
+    progress = models.JSONField(default=dict)    # avancement pendant l'analyse (espaces traités / total)
 
     class Meta:
         db_table = 'onedrive_sharing_scan'

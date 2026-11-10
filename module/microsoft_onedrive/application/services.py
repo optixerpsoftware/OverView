@@ -178,7 +178,7 @@ class SharingService:
         """Exécute l'audit complet (long : appelé par le worker)."""
         try:
             _, gw = self._ctx(connector_id)
-            records, truncated, errors = async_to_sync(self._scan)(gw)
+            records, truncated, errors = async_to_sync(self._scan)(gw, scan_id)
             done = self.scans.finish(scan_id, records=records, summary=summarize(records),
                                      truncated=truncated, errors=errors)
             publish("sharing.scan", {"connector_id": str(connector_id), "status": "done"})
@@ -188,17 +188,38 @@ class SharingService:
             publish("sharing.scan", {"connector_id": str(connector_id), "status": "failed"})
             raise
 
-    async def _scan(self, gw: DriveGateway):
+    async def _scan(self, gw: DriveGateway, scan_id: Optional[uuid.UUID] = None):
         domains, drives = await asyncio.gather(gw.internal_domains(), gw.list_drives())
-        sem = asyncio.Semaphore(3)
+        sem = asyncio.Semaphore(6)
         records: list[dict] = []
         truncated: list[str] = []
         errors: list[str] = []
 
+        done = 0
+
+        async def report() -> None:
+            nonlocal done
+            done += 1
+            await db(self.scans.progress)(scan_id, {"drives_done": done, "drives_total": len(drives),
+                                                     "records": len(records), "current": ""})
+
         async def scan_drive(d: dict) -> None:
+            try:
+                await scan_one(d)
+            finally:
+                if scan_id:
+                    await report()
+
+        async def scan_one(d: dict) -> None:
             async with sem:
                 try:
                     items, cut = await gw.scan_items(d["id"], MAX_ITEMS_PER_DRIVE)
+                    if d.get("kind") == "onedrive":
+                        # OneDrive : Microsoft n'indique la facette « shared » que sur les éléments réellement partagés
+                        # (vérifié sur le tenant : tous les liens, internes comme anonymes, la portaient). On ne demande
+                        # les permissions qu'à ceux-là : 15 requêtes au lieu de plus d'un millier. SharePoint : la
+                        # facette est présente partout (héritage), on garde l'analyse complète.
+                        items = [i for i in items if i.get("shared")]
                     perms = await gw.permissions_batch(d["id"], [i["id"] for i in items])
                 except Exception as e:
                     errors.append(f"{d['label']} : {_msg(e)}")

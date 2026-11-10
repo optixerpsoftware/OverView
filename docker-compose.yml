@@ -9,7 +9,12 @@ x-backend: &backend
     POSTGRES_USER: ${POSTGRES_USER:-overview}
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
     REDIS_URL: redis://redis:6379/0
-    ALLOWED_HOSTS: localhost,127.0.0.1,backend
+    # Accès depuis un autre poste du réseau : ajouter son adresse dans .env (ex. EXTRA_HOSTS=192.168.250.10)
+    ALLOWED_HOSTS: localhost,127.0.0.1,backend${EXTRA_HOSTS:+,${EXTRA_HOSTS}}
+    # Adresses publiques (retour du consentement Microsoft, liens des notifications)
+    API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:8000}
+    APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+    CORS_ORIGINS: http://localhost:3000${EXTRA_HOSTS:+,http://${EXTRA_HOSTS}:3000,https://${EXTRA_HOSTS}:3000}
   depends_on:
     db:
       condition: service_healthy
@@ -62,7 +67,7 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     ports:
       - "3000:3000"
     depends_on:

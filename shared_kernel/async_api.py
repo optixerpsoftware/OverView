@@ -65,6 +65,10 @@ class AsyncAPIView(View):
                                 {"Allow": ", ".join(m.upper() for m in self.http_method_names if hasattr(self, m))})
             if self.authentication_required:
                 request.user = await self._authenticate(request)
+                denied = await self._check_access(request)
+                if denied:
+                    code, detail, reason = denied
+                    return Response({"detail": detail, "code": reason}, code)
             request.query_params = request.GET
             request.data = self._parse_body(request)
             return await handler(request, *args, **kwargs)
@@ -80,6 +84,17 @@ class AsyncAPIView(View):
         if result is None:
             raise _Unauthorized("Informations d'authentification non fournies.")
         return result[0]
+
+    @staticmethod
+    async def _check_access(request):
+        """Politique d'accès configurée (settings.API_ACCESS_POLICY) : rôles, MFA obligatoire. None = autorisé."""
+        from django.conf import settings
+        from django.utils.module_loading import import_string
+        dotted = getattr(settings, "API_ACCESS_POLICY", "")
+        if not dotted:
+            return None
+        policy = import_string(dotted)
+        return await sync_to_async(policy, thread_sensitive=True)(request.user, request.method, request.path)
 
     @staticmethod
     def _parse_body(request) -> Any:

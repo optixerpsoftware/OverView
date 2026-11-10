@@ -90,11 +90,15 @@ class FakeGateway(DriveGateway):
     async def scan_items(self, drive_id, max_items):
         if drive_id == "d2":
             raise PermissionError("403 Sites")
-        return ([{"id": "f1", "name": "secret.xlsx", "path": "/RH/secret.xlsx", "webUrl": "https://x/f1"},
-                 {"id": "f2", "name": "child.docx", "path": "/RH/child.docx", "webUrl": "https://x/f2"},
-                 {"id": "f3", "name": "Public", "folder": {}, "path": "/Public", "webUrl": "https://x/f3"},
-                 {"id": "f4", "name": "chat.pdf", "path": "/Teams/chat.pdf", "webUrl": "https://x/f4"}], False)
-    async def permissions_batch(self, drive_id, item_ids): return [self.perms.get(i, []) for i in item_ids]
+        sh = {"scope": "users"}   # facette « shared » : présente seulement sur les éléments partagés (OneDrive)
+        return ([{"id": "f1", "name": "secret.xlsx", "path": "/RH/secret.xlsx", "webUrl": "https://x/f1", "shared": sh},
+                 {"id": "f2", "name": "child.docx", "path": "/RH/child.docx", "webUrl": "https://x/f2", "shared": sh},
+                 {"id": "f3", "name": "Public", "folder": {}, "path": "/Public", "webUrl": "https://x/f3", "shared": sh},
+                 {"id": "f4", "name": "chat.pdf", "path": "/Teams/chat.pdf", "webUrl": "https://x/f4", "shared": sh},
+                 {"id": "f5", "name": "prive.txt", "path": "/prive.txt", "webUrl": "https://x/f5"}], False)
+    async def permissions_batch(self, drive_id, item_ids):
+        self.asked = getattr(self, "asked", []) + list(item_ids)
+        return [self.perms.get(i, []) for i in item_ids]
     async def shared_scopes(self, drive_id, item_ids): return {i: self.scopes.get(i) for i in item_ids}
     async def delete_permission(self, drive_id, item_id, permission_id): self.deleted.append((item_id, permission_id))
 
@@ -117,6 +121,11 @@ class ServiceTests(TestCase):
         scan, created = self.svc.start_scan(self.c.id)
         self.assertTrue(created)
         return self.svc.run_scan(scan["id"], self.c.id)
+
+    def test_onedrive_scan_only_asks_permissions_for_shared_items(self):
+        self.scan()
+        self.assertIn("f1", self.gw.asked)
+        self.assertNotIn("f5", self.gw.asked)   # fichier sans facette « shared » : aucune requête de permissions
 
     def test_scan_collects_risky_shares_sorted_and_isolates_drive_errors(self):
         done = self.scan()

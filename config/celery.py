@@ -13,4 +13,6 @@ app.conf.imports = (
     'module.microsoft_compliance.interface.tasks',
     'module.microsoft_identity.interface.tasks',
     'module.microsoft_onedrive.interface.tasks',
+    'module.insights.interface.tasks',
+    'module.protection.interface.tasks',
 )

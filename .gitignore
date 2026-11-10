@@ -162,3 +162,11 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+
+# Frontend (Next.js) : le dossier frontend/lib contient du code source (client API, types, hooks),
+# à ne pas confondre avec le « lib/ » de packaging Python ignoré plus haut.
+!frontend/lib/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
