@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import type { TraceResult, TraceState } from '../lib/types';
 import { useApi, SLOW } from '../lib/useApi';
+import Loading from './Loading';
 
 const STATE: Record<TraceState, { label: string; cls: string; color: string }> = {
   delivered: { label: 'Remis', cls: 'ok', color: 'var(--success)' },
@@ -89,7 +90,7 @@ export default function MailTrace({ connectorId }: { connectorId: string }) {
       </form>
 
       {trace.error && <div className="messagebar error">{trace.error}</div>}
-      {trace.loading && <div className="sub">Interrogation d’Exchange Online…</div>}
+      {trace.loading && <Loading label="Interrogation d’Exchange Online…" lines={5} />}
 
       {s && r && (
         <>

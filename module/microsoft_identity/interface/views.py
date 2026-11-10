@@ -29,6 +29,9 @@ class _IdentityView(AsyncAPIView):
         if isinstance(exc, ConfirmationMismatch):
             return Response({'detail': "Confirmation invalide : saisis l'adresse exacte de la boîte."},
                             status.HTTP_400_BAD_REQUEST)
+        from module.microsoft_identity.application.quarantine_service import QuarantineRefused
+        if isinstance(exc, QuarantineRefused):
+            return Response({'detail': str(exc)}, status.HTTP_409_CONFLICT)
         if isinstance(exc, ValueError):
             return Response({'detail': str(exc)}, status.HTTP_400_BAD_REQUEST)
         if isinstance(exc, AsyncAPIView._internal_errors()):   # authentification, JSON invalide…
@@ -118,6 +121,30 @@ class EmergencyView(_IdentityView):
     """POST {"confirm": "<adresse>"} : pipeline d'urgence complet."""
 
     async def post(self, request, mailbox_id):
-        steps, pw = await _identity().emergency_async(
-            mailbox_id, by=request.user.get_username(), confirm=request.data.get('confirm'))
-        return no_store(Response({'steps': plain(steps), 'password': pw, 'ok': all(s.ok for s in steps)}))
+        raw = request.data.get('options') if isinstance(request.data, dict) else None
+        options = {k: bool(v) for k, v in (raw or {}).items() if k in ('remove_forwarding', 'disable_account', 'create_tap')}
+        svc = _identity()
+        steps, pw = await svc.emergency_async(
+            mailbox_id, by=request.user.get_username(), confirm=request.data.get('confirm'), options=options)
+        return no_store(Response({'steps': plain(steps), 'password': pw, 'tap': getattr(svc, 'last_tap', None),
+                                  'ok': all(s.ok for s in steps)}))
+
+
+class QuarantineView(_IdentityView):
+    """GET : état. POST {confirm, reason?} : met le compte en quarantaine. DELETE {confirm} : lève la quarantaine."""
+
+    async def get(self, request, mailbox_id):
+        from module.microsoft_identity.application.quarantine_service import AccountQuarantineService
+        return Response({'quarantine': await db(AccountQuarantineService.status)(mailbox_id)})
+
+    async def post(self, request, mailbox_id):
+        from module.microsoft_identity.application.quarantine_service import AccountQuarantineService
+        b = request.data if isinstance(request.data, dict) else {}
+        return Response({'quarantine': await AccountQuarantineService().start_async(
+            mailbox_id, confirm=b.get('confirm'), by=request.user.get_username(), reason=str(b.get('reason', '')))})
+
+    async def delete(self, request, mailbox_id):
+        from module.microsoft_identity.application.quarantine_service import AccountQuarantineService
+        b = request.data if isinstance(request.data, dict) else {}
+        return Response(await AccountQuarantineService().release_async(
+            mailbox_id, confirm=b.get('confirm'), by=request.user.get_username()))

@@ -51,6 +51,22 @@ class IdentityGateway(ABC):
     @abstractmethod
     async def set_password(self, upn: str, password: str, force_change: bool) -> None: ...
 
+    # --- utilisées par la procédure d'urgence (facultatives) ---
+    async def internal_domains(self) -> list[str]:
+        raise NotImplementedError
+
+    async def list_message_rules(self, upn: str) -> list[dict]:
+        raise NotImplementedError
+
+    async def delete_message_rule(self, upn: str, rule_id: str) -> None:
+        raise NotImplementedError
+
+    async def clear_mailbox_forwarding(self, upn: str) -> bool:
+        raise NotImplementedError
+
+    async def set_account_enabled(self, upn: str, enabled: bool) -> None:
+        raise NotImplementedError
+
 
 class SecuritySyncRepository(ABC):
     """Stockage local de l'état de sécurité d'un compte et de son historique de connexions."""

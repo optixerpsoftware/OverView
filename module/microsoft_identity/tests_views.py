@@ -26,7 +26,7 @@ class IdentityViewsTests(TransactionTestCase):
         self.conn = await MicrosoftConnector.objects.acreate(
             org_id=self.org.id, name="c", tenant_id=uuid.uuid4(), client_id=uuid.uuid4(), client_secret="s")
         self.mb = await Mailbox.objects.acreate(org_id=self.org.id, connector_id=self.conn.id, user_principal_name=UPN)
-        u = await get_user_model().objects.acreate(username="op")
+        u = await get_user_model().objects.acreate(username="op", is_superuser=True)
         self.h = {"Authorization": f"Bearer {AccessToken.for_user(u)}"}
         self.base = f"/api/identity/mailboxes/{self.mb.id}"
         self.gw = FakeGateway()
@@ -67,8 +67,8 @@ class IdentityViewsTests(TransactionTestCase):
             self.assertEqual(self.gw.calls, [])                         # rien d'exécuté sans bonne confirmation
             ok = await self.post("/emergency/", f'{{"confirm": "{UPN}"}}')
         body = ok.json()
-        self.assertEqual((ok.status_code, body["ok"], len(body["steps"])), (200, True, 3))
-        self.assertEqual(self.gw.calls, ["revoke", "reset", "revoke"])
+        self.assertEqual((ok.status_code, body["ok"], len(body["steps"])), (200, True, 6))
+        self.assertEqual((self.gw.calls[0], self.gw.calls[-2:]), ("revoke", ["reset", "revoke"]))
         self.assertEqual(body["password"], self.gw.password)
         self.assertEqual(ok["Cache-Control"], "no-store")
         for a in [a async for a in SecurityAction.objects.all()]:

@@ -8,6 +8,7 @@ import type {
   ComplianceSnapshot, Connector, Finding, FindingCategory, Note, ScorePoint, Severity,
 } from '../../../lib/types';
 import { useApi } from '../../../lib/useApi';
+import Breadcrumb from '../../../components/Breadcrumb';
 
 type Filter = 'todo' | 'pass' | 'unavailable' | 'all';
 
@@ -95,7 +96,7 @@ export default function CompliancePage({ params }: { params: Promise<{ id: strin
 
   return (
     <>
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › Gouvernance</div>
+      <Breadcrumb current="Gouvernance" />
 
       <header className="hero">
         <div style={{ color: 'var(--text)' }}><ScoreRing score={snap?.score ?? null} /></div>

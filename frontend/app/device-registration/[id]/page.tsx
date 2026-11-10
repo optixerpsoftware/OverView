@@ -8,6 +8,7 @@ import type {
   Connector, DeviceRegistrationSettings as Settings, DirectoryGroup, Note, SettingChange,
 } from '../../../lib/types';
 import { SLOW, useApi, useApiMutation } from '../../../lib/useApi';
+import Breadcrumb from '../../../components/Breadcrumb';
 
 const SCOPE_FR = { all: 'Tous les utilisateurs', none: 'Personne', selected: 'Une sélection de groupes' } as const;
 const GUID = /^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/;
@@ -156,7 +157,7 @@ export default function DeviceRegistrationPage({ params }: { params: Promise<{ i
 
   return (
     <>
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › Inscription des appareils</div>
+      <Breadcrumb current="Inscription des appareils" />
       <header className="hero">
         <div className="avatar-lg" aria-hidden="true">💻</div>
         <div className="hero-id">

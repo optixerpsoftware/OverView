@@ -1,9 +1,10 @@
 'use client';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
-import type { Mailbox, OutlookRule } from '../lib/types';
+import type { BulkResult, Mailbox, OutlookRule } from '../lib/types';
 import { describeActions, describeConditions, isSuspicious } from '../lib/ruleDescribe';
 import ConfirmDialog from './ConfirmDialog';
+import Loading from './Loading';
 
 interface Props {
   mailbox: Mailbox;
@@ -16,6 +17,23 @@ export default function RulesList({ mailbox, refreshKey, onMessage }: Props) {
   const [rules, setRules] = useState<OutlookRule[] | null>(null);
   const [toDelete, setToDelete] = useState<OutlookRule | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  async function removeSelected() {
+    try {
+      const res = await api<BulkResult>('/insights/bulk/rules/delete/', {
+        method: 'POST', body: { rule_ids: [...selected], confirm: 'SUPPRIMER' },
+      });
+      onMessage(`${res.succeeded} règle(s) supprimée(s)${res.failed ? `, ${res.failed} en échec` : ''}.`, res.failed > 0);
+      setSelected(new Set());
+      void load();
+    } catch (e) {
+      onMessage(errorMessage(e), true);
+    } finally {
+      setBulkOpen(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -41,13 +59,20 @@ export default function RulesList({ mailbox, refreshKey, onMessage }: Props) {
     }
   }
 
-  if (!rules) return <div className="empty">Chargement…</div>;
+  if (!rules) return <Loading />;
   if (rules.length === 0) return <div className="empty">Aucune règle synchronisée. Utilise « Synchroniser » pour les récupérer depuis Outlook.</div>;
 
   return (
     <>
+      {selected.size > 0 && (
+        <div className="bulkbar" role="region" aria-label="Actions sur la sélection">
+          <strong>{selected.size} règle(s) sélectionnée(s)</strong>
+          <button className="danger-solid" onClick={() => setBulkOpen(true)}>Supprimer la sélection</button>
+          <button className="ghost" onClick={() => setSelected(new Set())}>Annuler la sélection</button>
+        </div>
+      )}
       <table className="grid">
-        <thead><tr><th>#</th><th>Nom</th><th>État</th><th /></tr></thead>
+        <thead><tr><th style={{ width: 32 }} /><th>#</th><th>Nom</th><th>État</th><th /></tr></thead>
         <tbody>
           {rules.map((r) => {
             const conds = describeConditions(r.conditions);
@@ -57,6 +82,16 @@ export default function RulesList({ mailbox, refreshKey, onMessage }: Props) {
             return (
               <Fragment key={r.id}>
                 <tr onClick={() => setOpen(expanded ? null : r.id)} style={{ cursor: 'pointer' }}>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {!r.is_read_only && (
+                      <input type="checkbox" aria-label={`Sélectionner ${r.display_name}`} checked={selected.has(r.id)}
+                        onChange={() => setSelected((prev) => {
+                          const n = new Set(prev);
+                          if (n.has(r.id)) n.delete(r.id); else n.add(r.id);
+                          return n;
+                        })} />
+                    )}
+                  </td>
                   <td>{r.sequence}</td>
                   <td>
                     <strong>{r.display_name}</strong>
@@ -78,6 +113,7 @@ export default function RulesList({ mailbox, refreshKey, onMessage }: Props) {
                 </tr>
                 {expanded && (
                   <tr>
+                    <td />
                     <td />
                     <td colSpan={3}>
                       <div className="tiles" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', margin: '4px 0 8px' }}>
@@ -105,6 +141,15 @@ export default function RulesList({ mailbox, refreshKey, onMessage }: Props) {
           })}
         </tbody>
       </table>
+      {bulkOpen && (
+        <ConfirmDialog title={`Supprimer ${selected.size} règle(s)`} confirmLabel="Supprimer la sélection" requireText="SUPPRIMER"
+          onConfirm={() => void removeSelected()} onCancel={() => setBulkOpen(false)}>
+          <p>
+            Les <strong>{selected.size}</strong> règles sélectionnées seront supprimées <strong>dans Outlook</strong> (boîte{' '}
+            {mailbox.user_principal_name}), puis de l&apos;app. L&apos;action est journalisée. Irréversible.
+          </p>
+        </ConfirmDialog>
+      )}
       {toDelete && (
         <ConfirmDialog title="Supprimer la règle" confirmLabel="Supprimer la règle"
           onConfirm={() => void remove()} onCancel={() => setToDelete(null)}>

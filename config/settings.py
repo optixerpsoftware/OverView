@@ -59,6 +59,9 @@ INSTALLED_APPS = [
     'module.microsoft_outlook',
     'module.microsoft_onedrive',
     'module.organization',
+    'module.insights',
+    'module.protection',
+    'module.accounts',
 ]
 
 MIDDLEWARE = [
@@ -169,6 +172,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
+        'module.accounts.interface.views.RolePermission',   # rôles OverView (lecture seule / technicien / admin)
     ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
@@ -192,6 +196,18 @@ CELERY_BEAT_SCHEDULE = {
     'compliance-scan-all': {
         'task': 'module.microsoft_compliance.interface.tasks.scan_all_tenants',
         'schedule': 24 * 60 * 60,
+    },
+    'identity-hygiene-scan-all': {
+        'task': 'module.microsoft_identity.interface.tasks.scan_all_identity_hygiene',
+        'schedule': 24 * 60 * 60,   # comptes inactifs, invités, admins, applis tierces
+    },
+    'protection-evaluate-all': {
+        'task': 'module.protection.interface.tasks.evaluate_all_protection',
+        'schedule': 10 * 60,   # limites de fréquence (appareils / jour, échecs de connexion / heure)
+    },
+    'insights-evaluate-alerts': {
+        'task': 'module.insights.interface.tasks.evaluate_all_alerts',
+        'schedule': 10 * 60,   # alertes : réévaluées après les synchronisations, notifications des nouvelles
     },
     'outlook-sync-all-rules': {
         'task': 'module.microsoft_outlook.interface.tasks.sync_all_mailboxes',
@@ -218,3 +234,7 @@ if _redis:
     }
 else:  # développement local / tests sans Redis
     CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+
+
+# Contrôle d'accès des vues async (rôles + MFA obligatoire), appelé après l'authentification JWT.
+API_ACCESS_POLICY = 'module.accounts.application.service.check_access'

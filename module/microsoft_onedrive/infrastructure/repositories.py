@@ -17,7 +17,7 @@ def _dict(s: SharingScan) -> dict:
     return {
         "id": s.id, "connector_id": s.connector_id, "status": s.status, "created_at": s.create_at,
         "finished_at": s.finished_at, "error": s.error, "summary": s.summary, "records": s.records,
-        "truncated": s.truncated, "errors": s.errors,
+        "truncated": s.truncated, "errors": s.errors, "progress": s.progress,
     }
 
 
@@ -30,6 +30,9 @@ class DjangoSharingScanRepository(SharingScanRepository):
             status="done", finished_at=timezone.now(), records=records, summary=summary,
             truncated=truncated, errors=errors, error="")
         return _dict(SharingScan.objects.get(pk=scan_id))
+
+    def progress(self, scan_id, progress: dict) -> None:
+        SharingScan.objects.filter(pk=scan_id, status="running").update(progress=progress)
 
     def fail(self, scan_id, error: str) -> None:
         SharingScan.objects.filter(pk=scan_id).update(

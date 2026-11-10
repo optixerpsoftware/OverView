@@ -26,3 +26,15 @@ class MicrosoftConnector(BaseModel):
                 name='uniq_connector_per_org_app',
             ),
         ]
+
+
+class ConsentRequest(BaseModel):
+    """Demande de connexion par consentement administrateur en cours : l'identifiant sert de jeton anti-rejeu
+    (signé dans `state`), utilisable une seule fois et pendant 15 minutes."""
+    name = models.CharField(max_length=255, blank=True, default="")
+    created_by = models.CharField(max_length=150)
+    used_at = models.DateTimeField(null=True, blank=True)
+    connector_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'microsoft_connector_consent'

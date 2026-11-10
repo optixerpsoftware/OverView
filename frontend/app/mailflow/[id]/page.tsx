@@ -5,6 +5,7 @@ import MailTrace from '../../../components/MailTrace';
 import Quarantine from '../../../components/Quarantine';
 import type { Connector } from '../../../lib/types';
 import { useApi } from '../../../lib/useApi';
+import Breadcrumb from '../../../components/Breadcrumb';
 
 type Tab = 'flow' | 'quarantine';
 
@@ -15,7 +16,7 @@ export default function MailflowPage({ params }: { params: Promise<{ id: string 
 
   return (
     <div className="wide">
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › Flux de messagerie &amp; quarantaine</div>
+      <Breadcrumb current="Flux de messagerie & quarantaine" />
       <header className="hero">
         <div className="avatar-lg" aria-hidden="true">✉️</div>
         <div className="hero-id">

@@ -7,7 +7,7 @@ from module.microsoft_connector.domain.entities import ConnectorEntity
 from module.microsoft_identity.application.services import (
     ConfirmationMismatch, DeviceNotOwned, IdentityService,
 )
-from module.microsoft_identity.domain.entities import DeviceInfo, SignInInfo, UserSecurityProfile
+from module.microsoft_identity.domain.entities import AuthMethodInfo, DeviceInfo, SignInInfo, UserSecurityProfile
 from module.microsoft_identity.domain.sessions import estimate_active_sessions
 from module.microsoft_identity.domain.password import generate_password
 from module.microsoft_identity.domain.ports import IdentityGateway
@@ -31,6 +31,24 @@ class FakeGateway(IdentityGateway):
 
     async def delete_device(self, device_object_id):
         self.calls.append(f"delete:{device_object_id}")
+
+    rules = ()
+
+    async def internal_domains(self):
+        return ["example.com"]
+
+    async def list_message_rules(self, upn):
+        return list(self.rules)
+
+    async def delete_message_rule(self, upn, rule_id):
+        self.calls.append(f"delrule:{rule_id}")
+
+    async def clear_mailbox_forwarding(self, upn):
+        self.calls.append("clearfwd")
+        return False
+
+    async def set_account_enabled(self, upn, enabled):
+        self.calls.append(f"enabled:{enabled}")
 
     methods = None  # None : lecture refusée (403) ; sinon liste de AuthMethodInfo
 
@@ -106,10 +124,53 @@ class IdentityServiceTests(TestCase):
 
     def test_emergency_runs_full_pipeline_in_order(self):
         gw = FakeGateway()
+        gw.methods = [AuthMethodInfo("m-pw", "password", "Mot de passe", "", False),
+                      AuthMethodInfo("m-phone", "phone", "Téléphone", "+1 555", True),
+                      AuthMethodInfo("m-auth", "authenticator", "Microsoft Authenticator", "iPhone", True)]
         steps, pw = self.svc(gw).emergency(self.mb.id, "admin", "VICTIM@example.com")
-        self.assertEqual(gw.calls, ["revoke", "reset", "revoke"])
+        self.assertEqual(gw.calls, ["revoke", "delmethod:phone:m-phone", "delmethod:authenticator:m-auth",
+                                    "delete:obj-1", "clearfwd", "reset", "revoke"])   # le mot de passe n'est jamais supprimé
         self.assertTrue(all(s.ok for s in steps))
+        self.assertIn("2 méthode(s) supprimée(s)", steps[1].detail)
+        self.assertIn("PC-TEST", steps[2].detail)
         self.assertEqual(pw, gw.password)
+
+    def test_emergency_options_remove_external_forward_rules_disable_and_tap(self):
+        gw = FakeGateway()
+        gw.methods = []
+        gw.rules = [{"id": "r-ext", "displayName": "fwd", "actions": {"forwardTo": [{"emailAddress": {"address": "evil@gmail.com"}}]}},
+                    {"id": "r-int", "displayName": "int", "actions": {"redirectTo": [{"emailAddress": {"address": "boss@example.com"}}]}},
+                    {"id": "r-move", "displayName": "move", "actions": {"moveToFolder": "x"}}]
+        svc = self.svc(gw)
+        steps, pw = svc.emergency(self.mb.id, "admin", self.mb.user_principal_name,
+                                  {"disable_account": True, "create_tap": True})
+        self.assertIn("delrule:r-ext", gw.calls)
+        self.assertNotIn("delrule:r-int", gw.calls)
+        self.assertEqual(gw.calls[-2:], ["enabled:False", "tap:480:True"])
+        self.assertEqual(svc.last_tap["pass"], "S3cret-TAP-xyz")
+        self.assertTrue(all(s.ok for s in steps))
+        steps, _ = self.svc(FakeGateway()).emergency(self.mb.id, "admin", self.mb.user_principal_name, {"remove_forwarding": False})
+        self.assertNotIn("Suppression des transferts vers l'extérieur", [s.step for s in steps])
+
+    def test_emergency_retries_default_method_after_the_others(self):
+        class DefaultFirst(FakeGateway):
+            async def delete_auth_method(self, upn, kind, method_id):
+                if method_id == "m-default" and any(c.startswith("delmethod:phone:m-other") for c in self.calls) is False:
+                    raise RuntimeError("400 Cannot delete the default method")
+                self.calls.append(f"delmethod:{kind}:{method_id}")
+        gw = DefaultFirst()
+        gw.methods = [AuthMethodInfo("m-default", "authenticator", "Authenticator", "", True),
+                      AuthMethodInfo("m-other", "phone", "Téléphone", "", True)]
+        steps, _ = self.svc(gw).emergency(self.mb.id, "admin", self.mb.user_principal_name)
+        self.assertTrue(steps[1].ok)
+        self.assertEqual([c for c in gw.calls if c.startswith("delmethod")],
+                         ["delmethod:phone:m-other", "delmethod:authenticator:m-default"])
+
+    def test_emergency_mfa_failure_does_not_stop_the_pipeline(self):
+        gw = FakeGateway()   # lecture des méthodes refusée (403)
+        steps, pw = self.svc(gw).emergency(self.mb.id, "admin", self.mb.user_principal_name)
+        self.assertEqual([s.ok for s in steps], [True, False, True, True, True, True])
+        self.assertIsNotNone(pw)
 
     def test_emergency_requires_exact_confirmation_and_does_nothing_otherwise(self):
         gw = FakeGateway()
@@ -121,12 +182,12 @@ class IdentityServiceTests(TestCase):
         gw = FakeGateway(fail_reset=True)
         steps, pw = self.svc(gw).emergency(self.mb.id, "admin", self.mb.user_principal_name)
         self.assertIsNone(pw)
-        self.assertEqual([s.ok for s in steps], [True, False, True])
+        self.assertEqual([s.ok for s in steps], [True, False, True, True, False, True])
 
     def test_password_is_never_written_to_audit_log(self):
         gw = FakeGateway()
         steps, pw = self.svc(gw).emergency(self.mb.id, "admin", self.mb.user_principal_name)
-        self.assertEqual(SecurityAction.objects.count(), 3)
+        self.assertEqual(SecurityAction.objects.count(), 6)
         for a in SecurityAction.objects.all():
             self.assertNotIn(pw, a.detail)
 
@@ -138,7 +199,7 @@ class IdentityServiceTests(TestCase):
         self.assertEqual(triggered, [self.mb.id])
         triggered.clear()
         svc.emergency(self.mb.id, "admin", self.mb.user_principal_name)
-        self.assertEqual(triggered, [self.mb.id])          # 3 étapes, une seule synchro à la fin
+        self.assertEqual(triggered, [self.mb.id])          # 5 étapes, une seule synchro à la fin
 
     def test_a_failing_sync_trigger_never_breaks_the_action(self):
         def boom(_): raise RuntimeError("redis down")

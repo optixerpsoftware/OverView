@@ -108,20 +108,27 @@ class GraphRest:
             r = await self._send(http, "POST", f"{base}{path}", json=body)
         return self._check(r, requires, empty_ok=True)
 
+    async def patch(self, path: str, body: dict, *, requires: str = "", base: str = BASE) -> dict:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
+            r = await self._send(http, "PATCH", f"{base}{path}", json=body)
+        return self._check(r, requires, empty_ok=True)
+
     async def delete(self, path: str, *, requires: str = "", base: str = BASE) -> None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
             r = await self._send(http, "DELETE", f"{base}{path}")
         self._check(r, requires, empty_ok=True)
 
-    async def batch_get(self, paths: list[str], *, requires: str = "") -> list[Optional[dict]]:
+    async def batch_get(self, paths: list[str], *, requires: str = "", concurrency: int = 4) -> list[Optional[dict]]:
         """Jusqu'à 20 GET par requête groupée. Renvoie, dans l'ordre, le corps JSON de chaque
         réponse (None pour un 404/403 sur cet élément). Les éléments limités (429/503) sont
         retentés ; s'il en reste après MAX_RETRIES, on lève une erreur plutôt que de renvoyer
         un résultat incomplet (qui masquerait des partages lors d'un audit)."""
         results: list[Optional[dict]] = [None] * len(paths)
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            for start in range(0, len(paths), 20):
-                pending = list(enumerate(paths[start:start + 20], start))
+        sem = asyncio.Semaphore(concurrency)
+
+        async def chunk(http: httpx.AsyncClient, first: int) -> None:
+            async with sem:
+                pending = list(enumerate(paths[first:first + 20], first))
                 for attempt in range(MAX_RETRIES + 1):
                     body = {"requests": [{"id": str(i), "method": "GET", "url": p} for i, p in pending]}
                     r = await self._send(http, "POST", f"{BASE}/$batch", json=body)
@@ -136,11 +143,14 @@ class GraphRest:
                             retry.append((i, by_id[i]))
                             wait = max(wait, int((resp.get("headers") or {}).get("Retry-After", 2)))
                     if not retry:
-                        break
+                        return
                     if attempt == MAX_RETRIES:
                         raise GraphError(429, f"{len(retry)} élément(s) toujours limités par Microsoft Graph.")
                     await asyncio.sleep(min(wait or 2 ** attempt, 30))
                     pending = retry
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
+            await asyncio.gather(*(chunk(http, first) for first in range(0, len(paths), 20)))
         return results
 
     @staticmethod

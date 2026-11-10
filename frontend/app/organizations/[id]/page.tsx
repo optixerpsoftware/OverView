@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { use, useCallback, useState, type FormEvent } from 'react';
+import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import Menu from '../../../components/Menu';
 import Modal from '../../../components/Modal';
@@ -10,6 +10,8 @@ import type {
 } from '../../../lib/types';
 import { useApi } from '../../../lib/useApi';
 import ConnectorRow from './ConnectorRow';
+import Breadcrumb from '../../../components/Breadcrumb';
+import Loading from '../../../components/Loading';
 
 type Dialog = 'connector' | 'import' | null;
 
@@ -22,6 +24,34 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
   const mailboxes = useApi<Mailbox[]>(`/outlook/mailboxes/?org_id=${id}`);
   const [note, setNote] = useState<Note | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const consentCfg = useApi<{ available: boolean; redirect_uri: string }>('/connectors/consent/config/');
+  const [consentBusy, setConsentBusy] = useState(false);
+
+  // Retour du consentement Microsoft : ?consent=ok|pending|error&message=… → message, puis URL nettoyée.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const c = p.get('consent');
+    if (!c) return;
+    const msg = p.get('message') ?? '';
+    if (c === 'ok') setNote({ text: 'Tenant Microsoft 365 connecté. Tu peux maintenant importer les boîtes et lancer les analyses.', error: false });
+    else if (c === 'pending') setNote({ text: msg || 'Consentement accordé ; la connexion sera active dans une minute.', error: false });
+    else setNote({ text: `Connexion à Microsoft 365 non aboutie : ${msg}`, error: true });
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  // Un clic : on part directement chez Microsoft. Le tenant est celui du compte administrateur qui se connecte,
+  // et le connecteur est nommé automatiquement d'après l'organisation Microsoft 365.
+  async function startConsent() {
+    setConsentBusy(true);
+    try {
+      const { url } = await api<{ url: string }>('/connectors/consent/start/', { method: 'POST', body: { org_id: id } });
+      window.location.href = url;
+    } catch (err) {
+      setConsentBusy(false);
+      setNote({ text: errorMessage(err), error: true });
+    }
+  }
+
   const say = useCallback((text: string, error = false) => setNote(text ? { text, error } : null), []);
 
   async function run<T>(fn: () => Promise<T>, after?: (res: T) => void): Promise<void> {
@@ -125,13 +155,15 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
 
   return (
     <>
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › {org.data?.name ?? '…'}</div>
+      <Breadcrumb />
       <div className="pagehead" style={{ alignItems: 'flex-start' }}>
         <div>
           <h1>{org.data?.name ?? 'Organisation'}</h1>
           {org.data?.description && <div className="sub" style={{ marginTop: 2 }}>{org.data.description}</div>}
         </div>
-        <div className="chips" style={{ marginTop: 4 }}>
+        <div className="chips" style={{ marginTop: 4, alignItems: 'center' }}>
+          <Link href={`/reports/${id}`} className="btn">📄 Rapport</Link>
+          <Link href={`/protection/${id}`} className="btn">🛡️ Protection</Link>
           <span className="badge off">{nConnectors} connecteur{nConnectors > 1 ? 's' : ''}</span>
           <span className="badge off">{nMailboxes} boîte{nMailboxes > 1 ? 's' : ''}</span>
         </div>
@@ -144,7 +176,17 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
             <h2>Connecteurs Microsoft 365</h2>
             <div className="sub">Connexions au tenant : gouvernance, partage, sécurité des comptes.</div>
           </div>
-          <button className="primary" onClick={() => setDialog('connector')}>Ajouter un connecteur</button>
+          <div className="hero-actions">
+            {consentCfg.data?.available && (
+              <button className="primary" disabled={consentBusy} onClick={() => void startConsent()}
+                title="Redirige vers Microsoft : connecte-toi avec un administrateur général du tenant à connecter">
+                {consentBusy ? 'Redirection vers Microsoft…' : 'Connecter Microsoft 365'}
+              </button>
+            )}
+            <button className={consentCfg.data?.available ? '' : 'primary'} onClick={() => setDialog('connector')}>
+              {consentCfg.data?.available ? 'Ajouter manuellement' : 'Ajouter un connecteur'}
+            </button>
+          </div>
         </div>
         {connectors.data && nConnectors === 0 && (
           <div className="empty-state"><div className="big">🔌</div>Aucun connecteur. Ajoute celui de ton tenant pour commencer.</div>
@@ -208,7 +250,7 @@ export default function OrganizationPage({ params }: { params: Promise<{ id: str
               {(connectors.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-          {loading && <div className="empty">Chargement des boîtes du tenant…</div>}
+          {loading && <Loading label="Chargement des boîtes du tenant…" />}
           {available && (
             <>
               <ul className="picklist">

@@ -172,6 +172,32 @@ class GraphIdentityGateway(IdentityGateway):
         # Supprime l'objet appareil dans Entra ID (Device.ReadWrite.All requis).
         await self.graph.client.devices.by_device_id(device_object_id).delete()
 
+    async def internal_domains(self):
+        rows = await self.rest.get_all("/domains", {"$select": "id,isVerified"}, requires="Domain.Read.All")
+        return [d["id"].lower() for d in rows if d.get("isVerified")]
+
+    async def list_message_rules(self, upn):
+        return await self.rest.get_all(f"/users/{quote(upn, safe='@')}/mailFolders/inbox/messageRules",
+                                       requires="MailboxSettings.Read")
+
+    async def delete_message_rule(self, upn, rule_id):
+        await self.rest.delete(f"/users/{quote(upn, safe='@')}/mailFolders/inbox/messageRules/{safe_id(rule_id)}",
+                               requires="MailboxSettings.ReadWrite")
+
+    async def clear_mailbox_forwarding(self, upn):
+        """Retire le transfert SMTP de la boîte (Exchange Online). Renvoie True s'il y en avait un."""
+        from module.microsoft_outlook.infrastructure.exchange_gateway import ExchangeGateway
+        exo = ExchangeGateway(self.rest.graph, str(self.rest.graph.tenant_id))
+        rows = await exo.invoke("Get-Mailbox", {"Identity": upn})
+        had = bool(rows and (rows[0].get("ForwardingSmtpAddress") or rows[0].get("ForwardingAddress")))
+        if had:
+            await exo.invoke("Set-Mailbox", {"Identity": upn, "ForwardingSmtpAddress": None, "ForwardingAddress": None,
+                                             "DeliverToMailboxAndForward": False})
+        return had
+
+    async def set_account_enabled(self, upn, enabled):
+        await self.rest.patch(f"/users/{quote(upn, safe='@')}", {"accountEnabled": bool(enabled)}, requires="User.ReadWrite.All")
+
     async def set_password(self, upn, password, force_change):
         body = User(password_profile=PasswordProfile(
             password=password, force_change_password_next_sign_in=force_change))

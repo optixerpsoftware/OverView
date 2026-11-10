@@ -5,6 +5,7 @@ import type { Drive, DriveItem, Note, ShareEntry } from '../lib/types';
 import { SLOW, useApi } from '../lib/useApi';
 import ConfirmDialog from './ConfirmDialog';
 import { RISK_LABEL, shareLabel } from './ShareLabel';
+import Loading from './Loading';
 
 const fmtSize = (n: number) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} Go` : n > 1e6 ? `${(n / 1e6).toFixed(1)} Mo` : n > 1e3 ? `${Math.round(n / 1e3)} Ko` : `${n} o`);
 
@@ -114,7 +115,7 @@ export default function DriveExplorer({ connectorId }: { connectorId: string }) 
               </span>
             ))}
           </div>
-          {loading && <div className="empty">Chargement…</div>}
+          {loading && <Loading />}
           {items && items.length === 0 && <div className="empty">Dossier vide.</div>}
           {items && items.length > 0 && (
             <table className="grid">
@@ -139,8 +140,8 @@ export default function DriveExplorer({ connectorId }: { connectorId: string }) 
                     </tr>
                     {open === it.id && (
                       <tr key={`${it.id}-p`}>
-                        <td colSpan={4} style={{ background: '#fafafa' }}>
-                          {!perms && <div className="empty">Chargement des partages…</div>}
+                        <td colSpan={4} style={{ background: 'var(--subtle)' }}>
+                          {!perms && <Loading lines={2} />}
                           {perms && perms.length === 0 && <div className="empty">Aucun partage (seul le propriétaire a accès).</div>}
                           {perms?.map((p) => (
                             <div className="line" key={p.permission_id}>

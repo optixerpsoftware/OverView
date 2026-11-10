@@ -12,11 +12,13 @@ import type {
   TapResult, TotpResult,
 } from '../../../lib/types';
 import TotpReveal from '../../../components/TotpReveal';
-import { useApi } from '../../../lib/useApi';
+import { useApi, useApiMutation } from '../../../lib/useApi';
 import { useTick } from '../../../lib/useTick';
+import Breadcrumb from '../../../components/Breadcrumb';
+import Loading from '../../../components/Loading';
 
 type Ready = Omit<SecurityOverview, 'profile'> & { profile: SecurityProfile };
-type Dialog = 'emergency' | 'reset' | 'revoke' | null;
+type Dialog = 'emergency' | 'reset' | 'revoke' | 'quarantine' | 'release' | null;
 type Tab = 'sessions' | 'devices' | 'mfa' | 'signins' | 'rules' | 'log';
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -69,6 +71,7 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState<string | null>(null);
   const [steps, setSteps] = useState<EmergencyResult['steps'] | null>(null);
+  const [emOptions, setEmOptions] = useState({ remove_forwarding: true, disable_account: false, create_tap: false });
   const [deviceToDelete, setDeviceToDelete] = useState<Device | null>(null);
   // Entra ID est « éventuellement cohérent » : juste après une suppression, la liste peut encore
   // contenir l'appareil. On le masque localement et on recharge à retardement.
@@ -92,6 +95,17 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
 
   const upn = sec.data?.mailbox.user_principal_name ?? '';
   const base = `/identity/mailboxes/${id}`;
+  const quarantine = useApi<{ quarantine: { since: string; by: string; reason: string; detail: string } | null }>(`${base}/quarantine/`);
+  const [qReason, setQReason] = useState('');
+  const qStart = useApiMutation(
+    (confirm: string) => api(`${base}/quarantine/`, { method: 'POST', body: { confirm, reason: qReason } }),
+    { invalidate: [`${base}/`], success: 'Compte mis en quarantaine.', onSuccess: () => setDialog(null) },
+  );
+  const qRelease = useApiMutation(
+    (confirm: string) => api<{ detail: string }>(`${base}/quarantine/`, { method: 'DELETE', body: { confirm } }),
+    { invalidate: [`${base}/`], success: (r) => `Quarantaine levée : ${r.detail}.`, onSuccess: () => setDialog(null) },
+  );
+  const inQuarantine = quarantine.data?.quarantine ?? null;
   const fail = (e: unknown) => setNote({ text: errorMessage(e), error: true });
 
   async function syncRules() {
@@ -217,9 +231,10 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
   async function emergency(confirm: string) {
     setBusy(true);
     try {
-      const r = await api<EmergencyResult>(`${base}/emergency/`, { method: 'POST', body: { confirm } });
+      const r = await api<EmergencyResult>(`${base}/emergency/`, { method: 'POST', body: { confirm, options: emOptions } });
       setSteps(r.steps);
       setPassword(r.password);
+      if (r.tap) setTap(r.tap);
       setNote(r.ok ? null : { text: "Le pipeline d'urgence s'est terminé avec des erreurs (voir ci-dessous).", error: true });
       void reloadAll();
     } catch (e) {
@@ -283,7 +298,13 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
 
   return (
     <>
-      <div className="breadcrumb"><Link href="/">Organisations</Link> › Sécurité du compte</div>
+      <Breadcrumb current="Sécurité du compte" />
+      {inQuarantine && (
+        <div className="messagebar error">
+          🔒 Compte en quarantaine depuis le {new Date(inQuarantine.since).toLocaleString()} (par {inQuarantine.by}
+          {inQuarantine.reason ? ` — ${inQuarantine.reason}` : ''}). {inQuarantine.detail}.
+        </div>
+      )}
 
       <header className="hero">
         <div className="avatar-lg" aria-hidden="true">{initials(name || '?')}</div>
@@ -309,6 +330,9 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
           </button>
           <button disabled={!d || busy} onClick={() => setDialog('revoke')}>Déconnecter</button>
           <button disabled={!d || busy} onClick={() => setDialog('reset')}>Mot de passe</button>
+          {inQuarantine
+            ? <button disabled={busy} onClick={() => setDialog('release')}>Lever la quarantaine</button>
+            : <button disabled={!d || busy} onClick={() => setDialog('quarantine')}>🔒 Quarantaine</button>}
           <button className="primary danger-solid" disabled={!d || busy} onClick={() => setDialog('emergency')}>
             🚨 Urgence
           </button>
@@ -366,7 +390,7 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
       </nav>
 
       <section className="panel">
-        {!d && tab !== 'rules' && <div className="empty">{firstSync ? 'Synchronisation en cours…' : 'Chargement…'}</div>}
+        {!d && tab !== 'rules' && <Loading label={firstSync ? 'Première synchronisation du compte… (quelques secondes)' : undefined} lines={4} />}
 
         {tab === 'rules' && (
           <>
@@ -625,10 +649,46 @@ export default function MailboxSecurityPage({ params }: { params: Promise<{ id: 
           <p>Cette procédure va, dans l&apos;ordre :</p>
           <ol>
             <li>déconnecter <strong>toutes les sessions</strong> de {upn} ;</li>
+            <li>supprimer <strong>toutes les méthodes MFA</strong> (téléphones, Authenticator, clés, e-mail, codes…) — le mot de passe est conservé ;</li>
+            <li>supprimer <strong>tous les appareils</strong> enregistrés ou joints à son nom dans Entra ID ;</li>
+            {emOptions.remove_forwarding && <li>supprimer les <strong>règles de transfert vers l’extérieur</strong> et le <strong>transfert SMTP</strong> de la boîte ;</li>}
             <li>définir un <strong>nouveau mot de passe</strong> généré (changement forcé à la prochaine connexion) ;</li>
-            <li>déconnecter à nouveau toutes les sessions.</li>
+            <li>déconnecter à nouveau toutes les sessions{emOptions.disable_account ? ', puis désactiver le compte' : ''}{emOptions.create_tap ? ', puis créer un passe d’accès temporaire' : ''}.</li>
           </ol>
-          <p>L&apos;utilisateur perdra l&apos;accès immédiatement. Le nouveau mot de passe te sera affiché une seule fois.</p>
+          <div style={{ display: 'grid', gap: 6, margin: '8px 0' }}>
+            <label className="switch"><input type="checkbox" checked={emOptions.remove_forwarding}
+              onChange={(e) => setEmOptions({ ...emOptions, remove_forwarding: e.target.checked })} /> Supprimer les transferts vers l’extérieur (recommandé)</label>
+            <label className="switch"><input type="checkbox" checked={emOptions.disable_account}
+              onChange={(e) => setEmOptions({ ...emOptions, disable_account: e.target.checked })} /> Désactiver le compte (plus aucune connexion possible)</label>
+            <label className="switch"><input type="checkbox" checked={emOptions.create_tap}
+              onChange={(e) => setEmOptions({ ...emOptions, create_tap: e.target.checked })} /> Créer un passe d’accès temporaire pour la réinscription MFA (8 h, usage unique)</label>
+          </div>
+          <p>
+            L&apos;utilisateur perdra l&apos;accès immédiatement et devra <strong>réinscrire son MFA</strong> et
+            <strong> rejoindre ses appareils</strong>. Pour l&apos;aider à se réinscrire sans risque, crée-lui ensuite un
+            code d&apos;accès temporaire (MFA → Ajouter → Temporary Access Pass). Le nouveau mot de passe te sera affiché une
+            seule fois. Les suppressions sont irréversibles.
+          </p>
+        </ConfirmDialog>
+      )}
+      {dialog === 'quarantine' && (
+        <ConfirmDialog title="🔒 Mettre le compte en quarantaine" requireText={upn} confirmLabel="Mettre en quarantaine"
+          busy={qStart.isPending} onConfirm={(t) => qStart.mutate(t)} onCancel={() => setDialog(null)}>
+          <p>Mesure <strong>réversible</strong>, sans rien supprimer :</p>
+          <ul style={{ margin: '0 0 8px 18px' }}>
+            <li>connexion bloquée et sessions révoquées ;</li>
+            <li>accès à la boîte coupé (Outlook, mobile, IMAP, POP, EWS) — elle continue de <strong>recevoir</strong> le courrier ;</li>
+            <li>les réglages d’origine sont mémorisés et restaurés à la levée.</li>
+          </ul>
+          <div className="field"><label htmlFor="q-reason">Motif (facultatif)</label>
+            <input id="q-reason" value={qReason} onChange={(e) => setQReason(e.target.value)} placeholder="Ex. clic sur un lien d’hameçonnage" /></div>
+          <p className="sub">Pour un compte réellement compromis, préfère l’urgence (purge MFA, appareils, mot de passe).</p>
+        </ConfirmDialog>
+      )}
+      {dialog === 'release' && (
+        <ConfirmDialog title="Lever la quarantaine" requireText={upn} confirmLabel="Lever la quarantaine" danger={false}
+          busy={qRelease.isPending} onConfirm={(t) => qRelease.mutate(t)} onCancel={() => setDialog(null)}>
+          <p>Le compte pourra de nouveau se connecter et les protocoles de messagerie seront remis dans leur état d’origine.</p>
         </ConfirmDialog>
       )}
       {dialog === 'revoke' && (

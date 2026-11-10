@@ -63,7 +63,7 @@ urlpatterns = [
 @override_settings(ROOT_URLCONF="shared_kernel.tests_async_api")
 class AsyncAPIViewTests(TransactionTestCase):
     async def asetUp(self):
-        self.user = await get_user_model().objects.acreate(username="alice")
+        self.user = await get_user_model().objects.acreate(username="alice", is_superuser=True)
         self.auth = {"headers": {"Authorization": f"Bearer {AccessToken.for_user(self.user)}"}}
 
     async def test_views_are_real_coroutines(self):

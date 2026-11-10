@@ -138,7 +138,7 @@ class ServiceTests(ServiceBase):
 class ViewTests(ServiceBase):
     def setUp(self):
         super().setUp()
-        u = get_user_model().objects.create_user("adm", password="x")
+        u = get_user_model().objects.create_superuser("adm", password="x")
         self.h = {"Authorization": f"Bearer {AccessToken.for_user(u)}"}
         self.c = AsyncClient()
         for target, repl in (("ExchangeGateway", lambda *a, **k: self.gw), ("build_graph", lambda c: None)):
